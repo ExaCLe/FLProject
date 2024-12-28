@@ -1,0 +1,3 @@
+[tool.flwr.app]
+task = "federated_learning"
+num-rounds = 3
