@@ -7,7 +7,9 @@ from flwr.server.strategy import FedAvg
 from flwr.simulation import run_simulation
 import torch
 from transformers import GPT2ForSequenceClassification, GPT2Tokenizer
-from peft import LoraConfig, TaskType, get_peft_model
+from peft.tuners.lora import LoraConfig
+from peft.utils.peft_types import TaskType
+from peft.mapping import get_peft_model
 
 from client import GPT2FLClient
 from dataset import load_data
