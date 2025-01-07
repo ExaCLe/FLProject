@@ -1,138 +1,16 @@
 import argparse
 import flwr as fl
-from flwr.client import NumPyClient, ClientApp
-from flwr.common import Metrics, Context
+from flwr.client import ClientApp
+from flwr.common import Context
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.server.strategy import FedAvg
 from flwr.simulation import run_simulation
 import torch
-from torch.utils.data import DataLoader, Dataset
-import pandas as pd
 from transformers import GPT2ForSequenceClassification, GPT2Tokenizer
-from torch.optim import AdamW
 from peft import LoraConfig, TaskType, get_peft_model
 
-
-# Define a classification dataset for XNLI
-class CustomTextDataset(Dataset):
-    def __init__(self, sentence_pairs, labels, tokenizer, max_length):
-        self.sentence_pairs = sentence_pairs
-        self.labels = labels
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-
-    def __len__(self):
-        return len(self.sentence_pairs)
-
-    def __getitem__(self, idx):
-        sentence1, sentence2 = self.sentence_pairs[idx]
-        # Combine the two sentences. GPT-2 can handle raw text input.
-        combined_text = f"{sentence1} [SEP] {sentence2}"
-        tokenized = self.tokenizer(
-            combined_text,
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_length,
-            return_tensors="pt",
-        )
-        return (
-            tokenized["input_ids"].squeeze(),
-            tokenized["attention_mask"].squeeze(),
-            torch.tensor(self.labels[idx], dtype=torch.long),
-        )
-
-
-def load_data(language, tokenizer, max_length=128):
-    # This CSV should contain XNLI data filtered by language
-    # Columns: sentence1, sentence2, gold_label
-    # For example: "entailment", "neutral", "contradiction"
-    csv_path = "./data/xnli/xnli_filtered_dev.csv"
-    df = pd.read_csv(csv_path)
-    df = df[df["language"] == language]
-
-    # Map gold_label to integers
-    label_map = {"entailment": 0, "neutral": 1, "contradiction": 2}
-    labels = df["gold_label"].map(label_map).tolist()
-
-    sentence_pairs = list(zip(df["sentence1"], df["sentence2"]))
-    dataset = CustomTextDataset(sentence_pairs, labels, tokenizer, max_length)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
-    return dataloader
-
-
-# Training function
-def train(net, trainloader, epochs, device):
-    optimizer = AdamW(net.parameters(), lr=5e-5)
-    net.train()
-    net.to(device)
-    for _ in range(epochs):
-        for input_ids, attention_mask, labels in trainloader:
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            labels = labels.to(device)
-
-            outputs = net(
-                input_ids=input_ids, attention_mask=attention_mask, labels=labels
-            )
-            loss = outputs.loss
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-
-# Evaluation function with accuracy calculation
-def test(net, testloader, device):
-    net.eval()
-    net.to(device)
-    total_loss = 0
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for input_ids, attention_mask, labels in testloader:
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            labels = labels.to(device)
-
-            outputs = net(
-                input_ids=input_ids, attention_mask=attention_mask, labels=labels
-            )
-            loss = outputs.loss.item()
-            total_loss += loss
-
-            preds = torch.argmax(outputs.logits, dim=-1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-
-    avg_loss = total_loss / len(testloader)
-    accuracy = correct / total if total > 0 else 0.0
-    return avg_loss, accuracy
-
-
-# Flower client for federated learning
-class GPT2FLClient(NumPyClient):
-    def __init__(self, model, trainloader, testloader, device):
-        self.model = model
-        self.trainloader = trainloader
-        self.testloader = testloader
-        self.device = device
-
-    def get_parameters(self, config):
-        return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
-
-    def set_parameters(self, parameters, config):
-        params_dict = zip(self.model.state_dict().keys(), parameters)
-        state_dict = {k: torch.tensor(v) for k, v in params_dict}
-        self.model.load_state_dict(state_dict, strict=True)
-
-    def fit(self, parameters, config):
-        self.set_parameters(parameters, config)
-        train(self.model, self.trainloader, epochs=1, device=self.device)
-        return self.get_parameters(config), len(self.trainloader.dataset), {}
-
-    def evaluate(self, parameters, config):
-        self.set_parameters(parameters, config)
-        loss, accuracy = test(self.model, self.testloader, device=self.device)
-        return loss, len(self.testloader.dataset), {"accuracy": accuracy}
+from client import GPT2FLClient
+from dataset import load_data
 
 
 def main():
