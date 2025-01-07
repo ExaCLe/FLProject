@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
+from transformers import GPT2Tokenizer
 
 
 # Define a classification dataset for XNLI
@@ -16,10 +17,9 @@ class CustomTextDataset(Dataset):
 
     def __getitem__(self, idx):
         sentence1, sentence2 = self.sentence_pairs[idx]
-        # Combine the two sentences. GPT-2 can handle raw text input.
-        combined_text = f"{sentence1} [SEP] {sentence2}"
         tokenized = self.tokenizer(
-            combined_text,
+            sentence1,
+            sentence2,
             truncation=True,
             padding="max_length",
             max_length=self.max_length,
@@ -32,7 +32,7 @@ class CustomTextDataset(Dataset):
         )
 
 
-def load_data(language, tokenizer, max_length=128):
+def load_data(language, tokenizer, max_length=128, batch_size=8):
     # This CSV should contain XNLI data filtered by language
     # Columns: sentence1, sentence2, gold_label
     # For example: "entailment", "neutral", "contradiction"
@@ -46,5 +46,8 @@ def load_data(language, tokenizer, max_length=128):
 
     sentence_pairs = list(zip(df["sentence1"], df["sentence2"]))
     dataset = CustomTextDataset(sentence_pairs, labels, tokenizer, max_length)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
+    # Add drop_last=True to ensure consistent batch sizes
+    dataloader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True
+    )
     return dataloader

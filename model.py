@@ -1,5 +1,6 @@
 import torch
 from torch.optim import AdamW
+from tqdm import trange, tqdm
 
 
 # Training function
@@ -8,7 +9,7 @@ def train(net, trainloader, epochs, device):
     net.train()
     net.to(device)
     for _ in range(epochs):
-        for input_ids, attention_mask, labels in trainloader:
+        for input_ids, attention_mask, labels in tqdm(trainloader):
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
             labels = labels.to(device)
