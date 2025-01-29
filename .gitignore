@@ -4,3 +4,4 @@ FlowerDocumentation/
 tutorial/
 .wandb_runs/ 
 wandb/
+models/

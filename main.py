@@ -1,4 +1,5 @@
 import argparse
+import time
 import flwr as fl
 from flwr.client import ClientApp
 from flwr.common import Context
@@ -51,6 +52,15 @@ def get_device():
     return torch.device("cpu")
 
 
+def save_model(model, experiment_name):
+    """Save model checkpoint."""
+    save_dir = f"models/{experiment_name}"
+    os.makedirs(save_dir, exist_ok=True)
+    model_path = os.path.join(save_dir, f"model_round_{time.time()}")
+    model.save_pretrained(model_path)
+    return model_path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -68,6 +78,9 @@ def main():
         type=str,
         default="federated_xnli",
         help="Name for the wandb experiment",
+    )
+    parser.add_argument(
+        "--num_rounds", type=int, default=5, help="Number of federated rounds"
     )
     args = parser.parse_args()
 
@@ -135,16 +148,21 @@ def main():
         wandb.log({"validation/loss": loss, "validation/accuracy": accuracy})
         return loss, accuracy
 
+    experiment_name = args.experiment_name
+
     class CustomFedAvg(FedAvg):
         def aggregate_fit(self, *args, **kwargs):
-            # Add round number to the server metrics
             results = super().aggregate_fit(*args, **kwargs)
             if results is not None:
                 loss, accuracy = validate_global_model(model)
+                # Get current round number
+                # Save model checkpoint
+                model_path = save_model(model, experiment_name)
                 wandb.log(
                     {
                         "validation/loss": loss,
                         "validation/accuracy": accuracy,
+                        "model_checkpoint": model_path,
                     }
                 )
             return results
@@ -173,7 +191,7 @@ def main():
         ).to_client()
 
     def server_fn(context: Context) -> ServerAppComponents:
-        config = ServerConfig(num_rounds=5)
+        config = ServerConfig(num_rounds=args.num_rounds)
         return ServerAppComponents(strategy=strategy, config=config)
 
     server = ServerApp(server_fn=server_fn)
