@@ -29,6 +29,9 @@ class GPT2FLClient(NumPyClient):
         self.wandb_enabled = client_id is not None and wandb_group is not None
         self.run_id = None
 
+        # Ensure model is on correct device
+        self.model = self.model.to(device)
+
         # Create a directory to store run IDs if it doesn't exist
         os.makedirs("./.wandb_runs", exist_ok=True)
         self.run_id_file = f"./.wandb_runs/{client_id}.json" if client_id else None
@@ -53,15 +56,17 @@ class GPT2FLClient(NumPyClient):
             # Save the run ID for future use
             if self.run_id_file and not self.run_id:
                 with open(self.run_id_file, "w") as f:
-                    json.dump({"run_id": wandb.run.id}, f)
-                self.run_id = wandb.run.id
+                    json.dump({"run_id": wandb.run.id}, f)  # type: ignore
+                self.run_id = wandb.run.id  # type: ignore
 
     def get_parameters(self, config):
         return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
 
     def set_parameters(self, parameters, config):
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        state_dict = {k: torch.tensor(v) for k, v in params_dict}
+        state_dict = {
+            k: torch.tensor(v, device=self.device) for k, v in params_dict
+        }  # Move tensors to device
         self.model.load_state_dict(state_dict, strict=True)
 
     def fit(self, parameters, config):

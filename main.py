@@ -43,6 +43,14 @@ MODEL_CONFIGS = {
 }
 
 
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -113,7 +121,8 @@ def main():
     )
     model = get_peft_model(model, peft_config)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
+    print(f"Using device: {device}")
 
     languages = ["en", "de", "es", "fr", "ru"]
 
@@ -170,11 +179,17 @@ def main():
     server = ServerApp(server_fn=server_fn)
     client = ClientApp(client_fn=client_fn)
 
+    # Update simulation config to use GPU if available
+    gpu_config = {
+        "num_cpus": 1,
+        "num_gpus": 1 if device.type in ["cuda", "mps"] else 0,
+    }
+
     run_simulation(
         server_app=server,
         client_app=client,
         num_supernodes=args.num_supernodes,
-        backend_config={"client_resources": {"num_cpus": 1, "num_gpus": 0.0}},
+        # backend_config={"client_resources": gpu_config},
     )
 
     wandb.finish()
