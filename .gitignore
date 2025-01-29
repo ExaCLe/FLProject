@@ -2,3 +2,5 @@ FlowerDocumentation/
 .DS_Store 
 *.pyc
 tutorial/
+.wandb_runs/ 
+wandb/

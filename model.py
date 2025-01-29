@@ -8,6 +8,10 @@ def train(net, trainloader, epochs, device):
     optimizer = AdamW(net.parameters(), lr=5e-5)
     net.train()
     net.to(device)
+    total_loss = 0
+    correct = 0
+    total = 0
+    num_batches = 0
     for _ in range(epochs):
         for input_ids, attention_mask, labels in tqdm(trainloader):
             input_ids = input_ids.to(device)
@@ -17,10 +21,18 @@ def train(net, trainloader, epochs, device):
             outputs = net(
                 input_ids=input_ids, attention_mask=attention_mask, labels=labels
             )
+            preds = torch.argmax(outputs.logits, dim=-1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
             loss = outputs.loss
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            total_loss += loss.item()
+            num_batches += 1
+
+    avg_loss = total_loss / num_batches if num_batches > 0 else 0
+    return {"train_loss": avg_loss, "train_accuracy": correct / total}
 
 
 # Evaluation function with accuracy calculation

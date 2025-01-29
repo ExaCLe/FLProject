@@ -10,9 +10,14 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from peft.tuners.lora import LoraConfig
 from peft.utils.peft_types import TaskType
 from peft.mapping import get_peft_model
+import wandb
+from dataset import load_validation_data
+import shutil
+import os
 
 from client import GPT2FLClient
 from dataset import load_data
+from model import test
 
 MODEL_CONFIGS = {
     "gpt2": {
@@ -50,7 +55,32 @@ def main():
         choices=MODEL_CONFIGS.keys(),
         help="Model architecture to use",
     )
+    parser.add_argument(
+        "--experiment_name",
+        type=str,
+        default="federated_xnli",
+        help="Name for the wandb experiment",
+    )
     args = parser.parse_args()
+
+    # Create a unique experiment ID for grouping
+    experiment_id = wandb.util.generate_id()  # type: ignore
+
+    # Initialize wandb for the server
+    wandb.init(
+        project="federated-xnli",
+        name=f"server_{args.experiment_name}",
+        group=experiment_id,
+        config={
+            "model_name": args.model_name,
+            "num_supernodes": args.num_supernodes,
+        },
+        reinit=True,
+    )
+
+    # delete the .wandb_runs folder to delete exising run IDs
+    if os.path.exists("./.wandb_runs"):
+        shutil.rmtree("./.wandb_runs")
 
     # Initialize model and tokenizer based on selection
     model_config = MODEL_CONFIGS[args.model_name]
@@ -87,20 +117,51 @@ def main():
 
     languages = ["en", "de", "es", "fr", "ru"]
 
-    def client_fn(context: Context):
-        partition_id: int = int(context.node_config["partition-id"])
-        language = languages[partition_id % len(languages)]
-        trainloader = load_data(language, tokenizer)
-        testloader = load_data(language, tokenizer)
-        return GPT2FLClient(model, trainloader, testloader, device).to_client()
+    # Load validation dataset once
+    validation_loader = load_validation_data(tokenizer)
 
-    strategy = FedAvg(
+    def validate_global_model(model):
+        model.eval()
+        loss, accuracy = test(model, validation_loader, device)
+        wandb.log({"validation/loss": loss, "validation/accuracy": accuracy})
+        return loss, accuracy
+
+    class CustomFedAvg(FedAvg):
+        def aggregate_fit(self, *args, **kwargs):
+            # Add round number to the server metrics
+            results = super().aggregate_fit(*args, **kwargs)
+            if results is not None:
+                loss, accuracy = validate_global_model(model)
+                wandb.log(
+                    {
+                        "validation/loss": loss,
+                        "validation/accuracy": accuracy,
+                    }
+                )
+            return results
+
+    strategy = CustomFedAvg(
         fraction_fit=1.0,
         fraction_evaluate=0.5,
         min_fit_clients=5,
         min_evaluate_clients=5,
         min_available_clients=5,
     )
+
+    def client_fn(context: Context):
+        partition_id: int = int(context.node_config["partition-id"])
+        language = languages[partition_id % len(languages)]
+        trainloader = load_data(language, tokenizer)
+        testloader = load_data(language, tokenizer)
+        return GPT2FLClient(
+            model,
+            trainloader,
+            testloader,
+            device,
+            client_id=f"{language}_{partition_id}",
+            wandb_group=experiment_id,  # Pass the group ID to client
+            experiment_name=args.experiment_name,
+        ).to_client()
 
     def server_fn(context: Context) -> ServerAppComponents:
         config = ServerConfig(num_rounds=5)
@@ -115,6 +176,12 @@ def main():
         num_supernodes=args.num_supernodes,
         backend_config={"client_resources": {"num_cpus": 1, "num_gpus": 0.0}},
     )
+
+    wandb.finish()
+
+    # Clean up wandb run ID files after experiment is complete
+    if os.path.exists("./.wandb_runs"):
+        shutil.rmtree("./.wandb_runs")
 
 
 if __name__ == "__main__":

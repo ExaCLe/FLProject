@@ -51,3 +51,20 @@ def load_data(language, tokenizer, max_length=128, batch_size=8):
         dataset, batch_size=batch_size, shuffle=True, drop_last=True
     )
     return dataloader
+
+
+def load_validation_data(tokenizer, max_length=128, batch_size=32):
+    """Load the validation dataset."""
+    csv_path = "./data/xnli/xnli_validation.csv"
+    df = pd.read_csv(csv_path)
+
+    # Map gold_label to integers
+    label_map = {"entailment": 0, "neutral": 1, "contradiction": 2}
+    labels = df["gold_label"].map(label_map).tolist()
+
+    sentence_pairs = list(zip(df["sentence1"], df["sentence2"]))
+    dataset = CustomTextDataset(sentence_pairs, labels, tokenizer, max_length)
+    dataloader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, drop_last=False
+    )
+    return dataloader
