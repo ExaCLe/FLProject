@@ -66,16 +66,18 @@ def save_model(model, experiment_name):
 def centralized_training(model, languages, tokenizer, device, args):
     """Run centralized training on all data."""
     # Combine data from all languages
-    all_trainloaders = [load_data(lang, tokenizer) for lang in languages]
+    all_trainloaders = [
+        load_data(lang, tokenizer, batch_size=args.batch_size) for lang in languages
+    ]
     all_datasets = [loader.dataset for loader in all_trainloaders]
     combined_dataset = ConcatDataset(all_datasets)
 
     # Create a single dataloader with all data
     trainloader = DataLoader(
-        combined_dataset, batch_size=8, shuffle=True, drop_last=True
+        combined_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True
     )
 
-    validation_loader = load_validation_data(tokenizer)
+    validation_loader = load_validation_data(tokenizer, batch_size=args.batch_size)
 
     # Training loop
     for epoch in range(args.num_rounds):
@@ -91,8 +93,8 @@ def centralized_training(model, languages, tokenizer, device, args):
         # Log metrics
         wandb.log(
             {
-                "train_loss": metrics["train_loss"],
-                "train_accuracy": metrics["train_accuracy"],
+                "train/loss": metrics["train_loss"],
+                "train/accuracy": metrics["train_accuracy"],
                 "validation/loss": val_loss,
                 "validation/accuracy": val_accuracy,
                 "epoch": epoch,
@@ -114,8 +116,8 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
     def client_fn(context: Context):
         partition_id: int = int(context.node_config["partition-id"])
         language = languages[partition_id % len(languages)]
-        trainloader = load_data(language, tokenizer)
-        testloader = load_data(language, tokenizer)
+        trainloader = load_data(language, tokenizer, batch_size=args.batch_size)
+        testloader = load_data(language, tokenizer, batch_size=args.batch_size)
         return GPT2FLClient(
             model,
             trainloader,
@@ -172,6 +174,12 @@ def main():
         choices=["federated", "centralized"],
         default="federated",
         help="Training mode: federated or centralized",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=8,
+        help="Batch size for training and validation",
     )
     args = parser.parse_args()
 
