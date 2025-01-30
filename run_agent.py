@@ -1,31 +1,25 @@
 import argparse
 import wandb
-import subprocess
-import sys
-from datetime import datetime
+from types import SimpleNamespace
+from main import main, generate_run_name
+
+# Define default configuration that matches argparse defaults
+DEFAULT_CONFIG = {
+    "num_supernodes": 5,
+    "model_name": "gpt2",
+    "num_rounds": 5,
+    "mode": "federated",
+    "batch_size": 8,
+    "lora_r": 8,
+    "lora_alpha": 32,
+    "lora_dropout": 0.1,
+    "learning_rate": 5e-5,
+    "seed": 42,
+    "language_set": "full",
+}
 
 
-def generate_run_name(config):
-    """Generate descriptive name for individual runs based on their parameters."""
-    model = config.get("model_name", "unknown")
-    if model == "distilbert":
-        model = "d"
-    elif model == "multi-distilbert":
-        model = "md"
-    mode = config.get("mode", "unknown")
-
-    # Get key hyperparameters
-    lora_params = f"r{config.get('lora_r', '?')}_a{config.get('lora_alpha', '?')}"
-    batch = f"b{config.get('batch_size', '?')}"
-    language = config.get("language_set", "unknown")
-
-    # Add timestamp for uniqueness
-    timestamp = datetime.now().strftime("%H%M%S")
-
-    return f"{mode}_{language}_{model}_{lora_params}_{batch}_{timestamp}"
-
-
-def main():
+def run_agent():
     parser = argparse.ArgumentParser(description="Run a W&B sweep agent")
     parser.add_argument(
         "--sweep_id", type=str, required=True, help="Sweep ID to run agent for"
@@ -37,23 +31,20 @@ def main():
 
     def run_training():
         # Initialize wandb for this run
-        wandb.init(
-            project="federated-xnli",  # Change to your project name
-        )
-        # Override experiment_name with descriptive name
-        config = dict(wandb.config)
-        exp_name = generate_run_name(config)
-        config["experiment_name"] = exp_name
+        wandb.init()
 
-        # Run the training with all parameters
-        subprocess.run(
-            [
-                sys.executable,
-                "main.py",
-                *[f"--{k}={v}" for k, v in config.items()],
-            ],
-            check=True,
-        )
+        # Merge default config with wandb config
+        config = DEFAULT_CONFIG.copy()
+        config.update(dict(wandb.config))
+
+        # Generate experiment name
+        config["experiment_name"] = generate_run_name(config)
+
+        # Convert to SimpleNamespace
+        config = SimpleNamespace(**config)
+
+        # Run the training directly
+        main(config)
 
     # Start the sweep agent
     wandb.agent(
@@ -62,4 +53,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_agent()

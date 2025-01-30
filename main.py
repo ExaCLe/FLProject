@@ -19,6 +19,7 @@ from torch.utils.data import ConcatDataset
 from torch.utils.data import DataLoader
 import random
 import numpy as np
+from datetime import datetime
 
 from client import GPT2FLClient
 from dataset import load_data
@@ -245,7 +246,123 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
     wandb.log({"test/loss": test_loss, "test/accuracy": test_accuracy})
 
 
-def main():
+def generate_run_name(config):
+    """Generate descriptive name for individual runs based on their parameters."""
+    model = config.get("model_name", "unknown")
+    if model == "distilbert":
+        model = "d"
+    elif model == "multi-distilbert":
+        model = "md"
+    mode = config.get("mode", "unknown")
+
+    # Get key hyperparameters
+    lora_params = f"r{config.get('lora_r', '?')}_a{config.get('lora_alpha', '?')}"
+    batch = f"b{config.get('batch_size', '?')}"
+    language = config.get("language_set", "unknown")
+
+    # Add timestamp for uniqueness
+    timestamp = datetime.now().strftime("%H%M%S")
+
+    return f"{mode}_{language}_{model}_{lora_params}_{batch}_{timestamp}"
+
+
+def main(config):
+    # Set seeds for reproducibility
+    random.seed(config.seed)
+    np.random.seed(config.seed)
+    torch.manual_seed(config.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(config.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # Determine languages based on language_set
+    if config.language_set == "full":
+        languages = ["en", "de", "es", "fr", "zh"]
+    elif config.language_set == "limited":
+        languages = ["en", "de", "es", "fr"]
+    else:
+        if config.mode == "federated":
+            raise ValueError(
+                "Single language selection is only supported in centralized mode."
+            )
+        languages = [config.language_set]
+        available_languages = ["en", "de", "es", "fr", "zh"]
+        if languages[0] not in available_languages:
+            raise ValueError(
+                f"Unsupported language '{languages[0]}'. Available languages: {available_languages}"
+            )
+
+    # Adjust number of supernodes for federated mode based on selected languages
+    if config.mode == "federated":
+        config.num_supernodes = len(languages)
+
+    # Create a unique experiment ID for grouping
+    experiment_id = wandb.util.generate_id()
+
+    # Initialize wandb for the server
+    wandb.init(
+        project="federated-xnli",
+        name=config.experiment_name,
+        group=experiment_id,
+        config=vars(config),
+        reinit=True,
+    )
+
+    # delete the .wandb_runs folder to delete existing run IDs
+    if os.path.exists("./.wandb_runs"):
+        shutil.rmtree("./.wandb_runs")
+
+    # Initialize model and tokenizer based on selection
+    model_config = MODEL_CONFIGS[config.model_name]
+    tokenizer = AutoTokenizer.from_pretrained(model_config["path"])
+
+    # Handle padding token based on model type
+    if model_config["pad_token_strategy"] == "eos_token":
+        tokenizer.pad_token = tokenizer.eos_token
+
+    device = get_device()
+    print(f"Using device: {device}")
+
+    # Initialize the model
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_config["path"],
+        num_labels=3,
+    ).to(device)
+
+    # Set pad token ID if needed
+    if (
+        hasattr(model.config, "pad_token_id")
+        and model_config["pad_token_strategy"] == "eos_token"
+    ):
+        model.config.pad_token_id = tokenizer.pad_token_id
+
+    # Apply LoRA adapters with CLI arguments
+    peft_config = LoraConfig(
+        task_type=TaskType.SEQ_CLS,
+        inference_mode=False,
+        r=config.lora_r,
+        lora_alpha=config.lora_alpha,
+        lora_dropout=config.lora_dropout,
+        target_modules=(
+            ["q_lin", "v_lin"] if "distilbert" in config.model_name else None
+        ),
+    )
+    model = get_peft_model(model, peft_config)
+
+    if config.mode == "federated":
+        federated_training(model, languages, tokenizer, device, config, experiment_id)
+    else:
+        centralized_training(model, languages, tokenizer, device, config)
+
+    wandb.finish()
+
+    # Clean up wandb run ID files after experiment is complete
+    if os.path.exists("./.wandb_runs"):
+        shutil.rmtree("./.wandb_runs")
+
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--num_supernodes", type=int, default=5, help="Number of clients to simulate"
@@ -319,111 +436,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Set seeds for reproducibility
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    # Generate experiment name
+    args.experiment_name = generate_run_name(vars(args))
 
-    # Determine languages based on language_set
-    if args.language_set == "full":
-        languages = ["en", "de", "es", "fr", "zh"]
-    elif args.language_set == "limited":
-        languages = ["en", "de", "es", "fr"]
-    else:
-        # Assume args.language_set is a single language code
-        if args.mode == "federated":
-            raise ValueError(
-                "Single language selection is only supported in centralized mode."
-            )
-        languages = [args.language_set]
-        available_languages = ["en", "de", "es", "fr", "zh"]
-        if languages[0] not in available_languages:
-            raise ValueError(
-                f"Unsupported language '{languages[0]}'. Available languages: {available_languages}"
-            )
-
-    # Adjust number of supernodes for federated mode based on selected languages
-    if args.mode == "federated":
-        args.num_supernodes = len(languages)
-
-    # Create a unique experiment ID for grouping
-    experiment_id = wandb.util.generate_id()  # type: ignore
-
-    # Initialize wandb for the server
-    wandb.init(
-        project="federated-xnli",
-        name=f"{args.mode}_{args.experiment_name}",
-        group=experiment_id,
-        config={
-            "mode": args.mode,
-            "model_name": args.model_name,
-            "num_supernodes": args.num_supernodes,
-            "num_rounds": args.num_rounds,
-            "lora_r": args.lora_r,
-            "lora_alpha": args.lora_alpha,
-            "lora_dropout": args.lora_dropout,
-            "learning_rate": args.learning_rate,
-            "seed": args.seed,
-            "language_set": args.language_set,
-            "languages": languages,
-        },
-        reinit=True,
-    )
-
-    # delete the .wandb_runs folder to delete exising run IDs
-    if os.path.exists("./.wandb_runs"):
-        shutil.rmtree("./.wandb_runs")
-
-    # Initialize model and tokenizer based on selection
-    model_config = MODEL_CONFIGS[args.model_name]
-    tokenizer = AutoTokenizer.from_pretrained(model_config["path"])
-
-    # Handle padding token based on model type
-    if model_config["pad_token_strategy"] == "eos_token":
-        tokenizer.pad_token = tokenizer.eos_token
-
-    device = get_device()
-    print(f"Using device: {device}")
-
-    # Initialize the model
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_config["path"],
-        num_labels=3,
-    ).to(device)
-
-    # Set pad token ID if needed
-    if (
-        hasattr(model.config, "pad_token_id")
-        and model_config["pad_token_strategy"] == "eos_token"
-    ):
-        model.config.pad_token_id = tokenizer.pad_token_id
-
-    # Apply LoRA adapters with CLI arguments
-    peft_config = LoraConfig(
-        task_type=TaskType.SEQ_CLS,
-        inference_mode=False,
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-        target_modules=["q_lin", "v_lin"] if "distilbert" in args.model_name else None,
-    )
-    model = get_peft_model(model, peft_config)
-
-    if args.mode == "federated":
-        federated_training(model, languages, tokenizer, device, args, experiment_id)
-    else:
-        centralized_training(model, languages, tokenizer, device, args)
-
-    wandb.finish()
-
-    # Clean up wandb run ID files after experiment is complete
-    if os.path.exists("./.wandb_runs"):
-        shutil.rmtree("./.wandb_runs")
-
-
-if __name__ == "__main__":
-    main()
+    # Run main with processed arguments
+    main(args)
