@@ -60,14 +60,19 @@ class GPT2FLClient(NumPyClient):
                 self.run_id = wandb.run.id  # type: ignore
 
     def get_parameters(self, config):
-        return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+        # Move model to CPU before getting parameters
+        self.model.cpu()
+        parameters = [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+        # Move model back to original device
+        self.model.to(self.device)
+        return parameters
 
     def set_parameters(self, parameters, config):
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        state_dict = {
-            k: torch.tensor(v, device=self.device) for k, v in params_dict
-        }  # Move tensors to device
+        # First load parameters to CPU, then move to target device
+        state_dict = {k: torch.tensor(v) for k, v in params_dict}
         self.model.load_state_dict(state_dict, strict=True)
+        self.model.to(self.device)
 
     def fit(self, parameters, config):
         self.set_parameters(parameters, config)
@@ -78,13 +83,13 @@ class GPT2FLClient(NumPyClient):
         if self.wandb_enabled:
             wandb.log(
                 {
-                    "train_loss": metrics["train_loss"],
-                    "train_accuracy": metrics["train_accuracy"],
+                    "train/loss": metrics["train_loss"],
+                    "train/accuracy": metrics["train_accuracy"],
                     "round": round_num,
                 }
             )
 
-        return self.get_parameters(config), len(self.trainloader.dataset), {}
+        return self.get_parameters(config), len(self.trainloader.dataset), metrics
 
     def evaluate(self, parameters, config):
         self.set_parameters(parameters, config)
@@ -94,8 +99,8 @@ class GPT2FLClient(NumPyClient):
             round_num = config.get("round_num", 0)
             wandb.log(
                 {
-                    "eval_loss": loss,
-                    "eval_accuracy": accuracy,
+                    "eval/loss": loss,
+                    "eval/accuracy": accuracy,
                     "round": round_num,
                 }
             )

@@ -283,5 +283,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-RuntimeError: Attempting to deserialize object on CUDA device 0 but torch.cuda.device_count() is 0. Please use torch.load with map_location to map your storages to an existing device.
