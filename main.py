@@ -286,11 +286,14 @@ def main():
     if model_config["pad_token_strategy"] == "eos_token":
         tokenizer.pad_token = tokenizer.eos_token
 
+    device = get_device()
+    print(f"Using device: {device}")
+
     # Initialize the model
     model = AutoModelForSequenceClassification.from_pretrained(
         model_config["path"],
         num_labels=3,
-    )
+    ).to(device)
 
     # Set pad token ID if needed
     if (
@@ -308,9 +311,6 @@ def main():
         lora_dropout=args.lora_dropout,
     )
     model = get_peft_model(model, peft_config)
-
-    device = get_device()
-    print(f"Using device: {device}")
 
     languages = ["en", "de", "es", "fr", "ru"]
 
