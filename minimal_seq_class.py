@@ -5,7 +5,9 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
 class TinyDataset(torch.utils.data.Dataset):
-    def __init__(self, tokenizer, num_samples=20):
+    def __init__(
+        self, tokenizer, num_samples=100
+    ):  # increased samples to see batching effect
         self.tokenizer = tokenizer
         # Minimal texts and labels
         self.texts = ["Hello world"] * (num_samples // 2) + ["Foo bar"] * (
@@ -34,7 +36,7 @@ class TinyDataset(torch.utils.data.Dataset):
 def train_one_epoch(model, dataloader, optimizer, device):
     model.train()
     criterion = nn.CrossEntropyLoss()
-    for input_ids, attention_mask, labels in dataloader:
+    for batch_idx, (input_ids, attention_mask, labels) in enumerate(dataloader):
         input_ids, attention_mask, labels = (
             input_ids.to(device),
             attention_mask.to(device),
@@ -49,16 +51,26 @@ def train_one_epoch(model, dataloader, optimizer, device):
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch_size = 16  # explicitly set batch size
     tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
     dataset = TinyDataset(tokenizer)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, shuffle=True)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,  # drop last incomplete batch
+    )
+
+    print(f"Dataset size: {len(dataset)}")
+    print(f"Number of batches: {len(dataloader)}")
+    print(f"Batch size: {batch_size}")
 
     model = AutoModelForSequenceClassification.from_pretrained(
         "distilbert-base-uncased", num_labels=2
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
-    for epoch in range(20):
+    for epoch in range(2):
         # evaluate accuracy here
         correct = 0
         total = 0
