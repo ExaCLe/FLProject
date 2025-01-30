@@ -15,10 +15,12 @@ import wandb
 from dataset import load_validation_data
 import shutil
 import os
+from torch.utils.data import ConcatDataset
+from torch.utils.data import DataLoader
 
 from client import GPT2FLClient
 from dataset import load_data
-from model import test
+from model import test, train
 
 MODEL_CONFIGS = {
     "gpt2": {
@@ -61,6 +63,88 @@ def save_model(model, experiment_name):
     return model_path
 
 
+def centralized_training(model, languages, tokenizer, device, args):
+    """Run centralized training on all data."""
+    # Combine data from all languages
+    all_trainloaders = [load_data(lang, tokenizer) for lang in languages]
+    all_datasets = [loader.dataset for loader in all_trainloaders]
+    combined_dataset = ConcatDataset(all_datasets)
+
+    # Create a single dataloader with all data
+    trainloader = DataLoader(
+        combined_dataset, batch_size=8, shuffle=True, drop_last=True
+    )
+
+    validation_loader = load_validation_data(tokenizer)
+
+    # Training loop
+    for epoch in range(args.num_rounds):
+        # Train for one epoch
+        metrics = train(model, trainloader, epochs=1, device=device)
+
+        # Evaluate
+        val_loss, val_accuracy = test(model, validation_loader, device)
+
+        # Save model
+        model_path = save_model(model, args.experiment_name)
+
+        # Log metrics
+        wandb.log(
+            {
+                "train_loss": metrics["train_loss"],
+                "train_accuracy": metrics["train_accuracy"],
+                "validation/loss": val_loss,
+                "validation/accuracy": val_accuracy,
+                "epoch": epoch,
+                "model_checkpoint": model_path,
+            }
+        )
+
+
+def federated_training(model, languages, tokenizer, device, args, experiment_id):
+    """Run federated training."""
+    strategy = CustomFedAvg(
+        fraction_fit=1.0,
+        fraction_evaluate=0.5,
+        min_fit_clients=5,
+        min_evaluate_clients=5,
+        min_available_clients=5,
+    )
+
+    def client_fn(context: Context):
+        partition_id: int = int(context.node_config["partition-id"])
+        language = languages[partition_id % len(languages)]
+        trainloader = load_data(language, tokenizer)
+        testloader = load_data(language, tokenizer)
+        return GPT2FLClient(
+            model,
+            trainloader,
+            testloader,
+            device,
+            client_id=f"{language}_{partition_id}",
+            wandb_group=experiment_id,  # Pass the group ID to client
+            experiment_name=args.experiment_name,
+        ).to_client()
+
+    def server_fn(context: Context) -> ServerAppComponents:
+        config = ServerConfig(num_rounds=args.num_rounds)
+        return ServerAppComponents(strategy=strategy, config=config)
+
+    server = ServerApp(server_fn=server_fn)
+    client = ClientApp(client_fn=client_fn)
+
+    gpu_config = {
+        "num_cpus": 1,
+        "num_gpus": 1 if device.type in ["cuda", "mps"] else 0,
+    }
+
+    run_simulation(
+        server_app=server,
+        client_app=client,
+        num_supernodes=args.num_supernodes,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -82,6 +166,13 @@ def main():
     parser.add_argument(
         "--num_rounds", type=int, default=5, help="Number of federated rounds"
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["federated", "centralized"],
+        default="federated",
+        help="Training mode: federated or centralized",
+    )
     args = parser.parse_args()
 
     # Create a unique experiment ID for grouping
@@ -90,11 +181,13 @@ def main():
     # Initialize wandb for the server
     wandb.init(
         project="federated-xnli",
-        name=f"server_{args.experiment_name}",
+        name=f"{args.mode}_{args.experiment_name}",
         group=experiment_id,
         config={
+            "mode": args.mode,
             "model_name": args.model_name,
             "num_supernodes": args.num_supernodes,
+            "num_rounds": args.num_rounds,
         },
         reinit=True,
     )
@@ -167,48 +260,10 @@ def main():
                 )
             return results
 
-    strategy = CustomFedAvg(
-        fraction_fit=1.0,
-        fraction_evaluate=0.5,
-        min_fit_clients=5,
-        min_evaluate_clients=5,
-        min_available_clients=5,
-    )
-
-    def client_fn(context: Context):
-        partition_id: int = int(context.node_config["partition-id"])
-        language = languages[partition_id % len(languages)]
-        trainloader = load_data(language, tokenizer)
-        testloader = load_data(language, tokenizer)
-        return GPT2FLClient(
-            model,
-            trainloader,
-            testloader,
-            device,
-            client_id=f"{language}_{partition_id}",
-            wandb_group=experiment_id,  # Pass the group ID to client
-            experiment_name=args.experiment_name,
-        ).to_client()
-
-    def server_fn(context: Context) -> ServerAppComponents:
-        config = ServerConfig(num_rounds=args.num_rounds)
-        return ServerAppComponents(strategy=strategy, config=config)
-
-    server = ServerApp(server_fn=server_fn)
-    client = ClientApp(client_fn=client_fn)
-
-    # Update simulation config to use GPU if available
-    gpu_config = {
-        "num_cpus": 1,
-        "num_gpus": 1 if device.type in ["cuda", "mps"] else 0,
-    }
-
-    run_simulation(
-        server_app=server,
-        client_app=client,
-        num_supernodes=args.num_supernodes,
-        # backend_config={"client_resources": gpu_config},
-    )
+    if args.mode == "federated":
+        federated_training(model, languages, tokenizer, device, args, experiment_id)
+    else:
+        centralized_training(model, languages, tokenizer, device, args)
 
     wandb.finish()
 
