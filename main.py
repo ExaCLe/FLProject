@@ -103,6 +103,28 @@ def centralized_training(model, languages, tokenizer, device, args):
         )
 
 
+class DeviceAgnosticFedAvg(FedAvg):
+    def __init__(self, device, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.device = device
+
+    def aggregate_fit(self, *args, **kwargs):
+        # Move current model parameters to CPU before aggregation
+        with torch.device("cpu"):
+            results = super().aggregate_fit(*args, **kwargs)
+        if results is not None:
+            loss, accuracy = validate_global_model(model)
+            model_path = save_model(model, experiment_name)
+            wandb.log(
+                {
+                    "validation/loss": loss,
+                    "validation/accuracy": accuracy,
+                    "model_checkpoint": model_path,
+                }
+            )
+        return results
+
+
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
     # Load validation dataset once
     validation_loader = load_validation_data(tokenizer)
@@ -115,25 +137,9 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
 
     experiment_name = args.experiment_name
 
-    class CustomFedAvg(FedAvg):
-        def aggregate_fit(self, *args, **kwargs):
-            results = super().aggregate_fit(*args, **kwargs)
-            if results is not None:
-                loss, accuracy = validate_global_model(model)
-                # Get current round number
-                # Save model checkpoint
-                model_path = save_model(model, experiment_name)
-                wandb.log(
-                    {
-                        "validation/loss": loss,
-                        "validation/accuracy": accuracy,
-                        "model_checkpoint": model_path,
-                    }
-                )
-            return results
-
     """Run federated training."""
-    strategy = CustomFedAvg(
+    strategy = DeviceAgnosticFedAvg(
+        device=device,
         fraction_fit=1.0,
         fraction_evaluate=0.5,
         min_fit_clients=5,

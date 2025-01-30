@@ -61,18 +61,19 @@ class GPT2FLClient(NumPyClient):
 
     def get_parameters(self, config):
         """Get parameters from the model, ensuring they're on CPU."""
-        with torch.device("cpu"):
-            return [
-                val.cpu().detach().numpy() for _, val in self.model.state_dict().items()
-            ]
+        return [
+            val.cpu().detach().numpy() for _, val in self.model.state_dict().items()
+        ]
 
     def set_parameters(self, parameters, config):
         """Set parameters in the model, handling device placement carefully."""
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        with torch.device("cpu"):
-            state_dict = {k: torch.tensor(v) for k, v in params_dict}
-        self.model.load_state_dict(state_dict, strict=True)
-        self.model = self.model.to(self.device)
+        state_dict = {k: torch.tensor(v, device="cpu") for k, v in params_dict}
+
+        # Load state dict with explicit device mapping
+        self.model.load_state_dict(
+            {k: v.to(self.device) for k, v in state_dict.items()}, strict=True
+        )
 
     def fit(self, parameters, config):
         self.set_parameters(parameters, config)
