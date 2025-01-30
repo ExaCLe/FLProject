@@ -173,7 +173,7 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         server_app=server,
         client_app=client,
         num_supernodes=args.num_supernodes,
-        backend_config=backend_config,
+        backend_config=backend_config,  # type: ignore
     )
 
 
@@ -211,6 +211,26 @@ def main():
         default=8,
         help="Batch size for training and validation",
     )
+    # Add LoRA hyperparameters
+    parser.add_argument(
+        "--lora_r",
+        type=int,
+        default=8,
+        help="Rank of the LoRA update matrices",
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=int,
+        default=32,
+        help="Scaling factor for the LoRA update",
+    )
+    parser.add_argument(
+        "--lora_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout probability for LoRA layers",
+    )
+
     args = parser.parse_args()
 
     # Create a unique experiment ID for grouping
@@ -226,6 +246,9 @@ def main():
             "model_name": args.model_name,
             "num_supernodes": args.num_supernodes,
             "num_rounds": args.num_rounds,
+            "lora_r": args.lora_r,
+            "lora_alpha": args.lora_alpha,
+            "lora_dropout": args.lora_dropout,
         },
         reinit=True,
     )
@@ -255,13 +278,13 @@ def main():
     ):
         model.config.pad_token_id = tokenizer.pad_token_id
 
-    # Apply LoRA adapters
+    # Apply LoRA adapters with CLI arguments
     peft_config = LoraConfig(
         task_type=TaskType.SEQ_CLS,
         inference_mode=False,
-        r=8,
-        lora_alpha=32,
-        lora_dropout=0.1,
+        r=args.lora_r,
+        lora_alpha=args.lora_alpha,
+        lora_dropout=args.lora_dropout,
     )
     model = get_peft_model(model, peft_config)
 
