@@ -5,8 +5,8 @@ from contextlib import nullcontext
 
 
 # Training function
-def train(net, trainloader, epochs, device):
-    optimizer = AdamW(net.parameters(), lr=5e-5)
+def train(net, trainloader, epochs, device, learning_rate=5e-5):
+    optimizer = AdamW(net.parameters(), lr=learning_rate)
     net.train()
     net.to(device)
     total_loss = 0

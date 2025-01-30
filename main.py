@@ -251,6 +251,12 @@ def main():
         default=0.1,
         help="Dropout probability for LoRA layers",
     )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=5e-5,
+        help="Learning rate for training",
+    )
 
     args = parser.parse_args()
 

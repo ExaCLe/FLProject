@@ -20,3 +20,5 @@ parameters:
     value: 0.1
   experiment_name:
     value: "auto" # Will be overwritten by init_sweep.py
+  learning_rate:
+    value: 5e-5
