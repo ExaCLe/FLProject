@@ -79,8 +79,18 @@ def centralized_training(model, languages, tokenizer, device, args):
 
     validation_loader = load_validation_data(tokenizer, batch_size=args.batch_size)
 
+    print(f"\nStarting centralized training for {args.num_rounds} epochs")
+    print(f"Model: {args.model_name}, Batch size: {args.batch_size}")
+    print(
+        f"LoRA params - r: {args.lora_r}, alpha: {args.lora_alpha}, dropout: {args.lora_dropout}"
+    )
+    print("-" * 50)
+
     # Training loop
+    val_accuracy = 0
     for epoch in range(args.num_rounds):
+        print(f"\nEpoch {epoch + 1}/{args.num_rounds}")
+
         # Train for one epoch
         metrics = train(model, trainloader, epochs=1, device=device)
 
@@ -89,6 +99,14 @@ def centralized_training(model, languages, tokenizer, device, args):
 
         # Save model
         model_path = save_model(model, args.experiment_name)
+
+        # Print progress
+        print(
+            f"Train Loss: {metrics['train_loss']:.4f} | "
+            f"Train Acc: {metrics['train_accuracy']:.4f} | "
+            f"Val Loss: {val_loss:.4f} | "
+            f"Val Acc: {val_accuracy:.4f}"
+        )
 
         # Log metrics
         wandb.log(
@@ -101,6 +119,9 @@ def centralized_training(model, languages, tokenizer, device, args):
                 "model_checkpoint": model_path,
             }
         )
+
+    print("\nTraining completed!")
+    print(f"Final validation accuracy: {val_accuracy:.4f}")
 
 
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
