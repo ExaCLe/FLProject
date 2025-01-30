@@ -17,6 +17,8 @@ import shutil
 import os
 from torch.utils.data import ConcatDataset
 from torch.utils.data import DataLoader
+import random
+import numpy as np
 
 from client import GPT2FLClient
 from dataset import load_data
@@ -263,8 +265,23 @@ def main():
         default=5e-5,
         help="Learning rate for training",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility",
+    )
 
     args = parser.parse_args()
+
+    # Set seeds for reproducibility
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     # Create a unique experiment ID for grouping
     experiment_id = wandb.util.generate_id()  # type: ignore
