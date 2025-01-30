@@ -31,8 +31,12 @@ MODEL_CONFIGS = {
         "path": "google-t5/t5-small",
         "pad_token_strategy": "pad_token",
     },
+    "multi-distilbert": {
+        "path": "distilbert/distilbert-base-multilingual-cased",
+        "pad_token_strategy": "pad_token",
+    },
     "distilbert": {
-        "path": "distilbert/distilbert-base-uncased",
+        "path": "distilbert/distilbert-base-cased",
         "pad_token_strategy": "pad_token",
     },
     "distilroberta": {
@@ -189,7 +193,9 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
     server = ServerApp(server_fn=server_fn)
     client = ClientApp(client_fn=client_fn)
 
-    backend_config = {"client_resources": {"num_gpus": 1, "num_cpus": 1}}
+    backend_config = {
+        "client_resources": {"num_gpus": 1 if device == "cuda" else 0, "num_cpus": 1}
+    }
     run_simulation(
         server_app=server,
         client_app=client,
@@ -315,10 +321,11 @@ def main():
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
+        target_modules=["q_lin", "v_lin"] if "distilbert" in args.model_name else None,
     )
     model = get_peft_model(model, peft_config)
 
-    languages = ["en", "de", "es", "fr", "ru"]
+    languages = ["en", "de", "es", "fr", "zh"]
 
     if args.mode == "federated":
         federated_training(model, languages, tokenizer, device, args, experiment_id)
