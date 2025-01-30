@@ -1,0 +1,36 @@
+program: main.py
+method: bayes
+metric:
+  name: validation/accuracy
+  goal: maximize
+parameters:
+  lora_r:
+    distribution: int_uniform
+    min: 4
+    max: 32
+  lora_alpha:
+    distribution: int_uniform
+    min: 16
+    max: 64
+  lora_dropout:
+    distribution: uniform
+    min: 0.0
+    max: 0.5
+  learning_rate:
+    distribution: log_uniform
+    min: 1e-6
+    max: 1e-2
+  batch_size:
+    values: [8, 16, 32, 64]
+  model_name:
+    value: ["multi-distilbert"]
+  mode:
+    value: "federated"
+  num_rounds:
+    value: 5
+  num_supernodes:
+    value: 5
+  experiment_name:
+    value: "auto" # Will be overwritten by init_sweep.py
+  language_set:
+    value: "en"

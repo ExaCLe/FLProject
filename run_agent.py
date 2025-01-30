@@ -8,16 +8,21 @@ from datetime import datetime
 def generate_run_name(config):
     """Generate descriptive name for individual runs based on their parameters."""
     model = config.get("model_name", "unknown")
+    if model == "distilbert":
+        model = "d"
+    elif model == "multi-distilbert":
+        model = "md"
     mode = config.get("mode", "unknown")
 
     # Get key hyperparameters
     lora_params = f"r{config.get('lora_r', '?')}_a{config.get('lora_alpha', '?')}"
     batch = f"b{config.get('batch_size', '?')}"
+    language = config.get("language_set", "unknown")
 
     # Add timestamp for uniqueness
     timestamp = datetime.now().strftime("%H%M%S")
 
-    return f"{mode}_{model}_{lora_params}_{batch}_{timestamp}"
+    return f"{mode}_{language}_{model}_{lora_params}_{batch}_{timestamp}"
 
 
 def main():

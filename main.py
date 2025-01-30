@@ -12,7 +12,7 @@ from peft.tuners.lora import LoraConfig
 from peft.utils.peft_types import TaskType
 from peft.mapping import get_peft_model
 import wandb
-from dataset import load_validation_data
+from dataset import load_test_data, load_validation_data
 import shutil
 import os
 from torch.utils.data import ConcatDataset
@@ -83,7 +83,9 @@ def centralized_training(model, languages, tokenizer, device, args):
         combined_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True
     )
 
-    validation_loader = load_validation_data(tokenizer, batch_size=args.batch_size)
+    validation_loader = load_validation_data(
+        tokenizer, languages=languages, batch_size=args.batch_size
+    )
 
     print(f"\nStarting centralized training for {args.num_rounds} epochs")
     print(f"Model: {args.model_name}, Batch size: {args.batch_size}")
@@ -93,7 +95,9 @@ def centralized_training(model, languages, tokenizer, device, args):
     print("-" * 50)
 
     # Training loop
-    val_accuracy = 0
+    best_val_accuracy = 0
+    best_model_state = None
+
     for epoch in range(args.num_rounds):
         print(f"\nEpoch {epoch + 1}/{args.num_rounds}")
 
@@ -126,13 +130,35 @@ def centralized_training(model, languages, tokenizer, device, args):
             }
         )
 
+        # Save best model state
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            best_model_state = {
+                k: v.cpu().clone() for k, v in model.state_dict().items()
+            }
+
+    # Load best model for final test
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    # Final test evaluation
+    test_loader = load_test_data(
+        tokenizer, languages=languages, batch_size=args.batch_size
+    )
+    test_loss, test_accuracy = test(model, test_loader, device)
+    print("\nFinal Test Results:")
+    print(f"Test Loss: {test_loss:.4f}")
+    print(f"Test Accuracy: {test_accuracy:.4f}")
+
+    wandb.log({"test/loss": test_loss, "test/accuracy": test_accuracy})
+
     print("\nTraining completed!")
-    print(f"Final validation accuracy: {val_accuracy:.4f}")
+    print(f"Final validation accuracy: {best_val_accuracy:.4f}")
 
 
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
-    # Load validation dataset once
-    validation_loader = load_validation_data(tokenizer)
+    # Load validation dataset once with correct languages
+    validation_loader = load_validation_data(tokenizer, languages=languages)
 
     def validate_global_model(model):
         model.eval()
@@ -164,13 +190,15 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
             return results
 
     """Run federated training."""
+    # Update strategy parameters based on number of languages
+    min_clients = len(languages)
     strategy = DeviceAgnosticFedAvg(
         device=device,
         fraction_fit=1.0,
-        fraction_evaluate=0.5,
-        min_fit_clients=5,
-        min_evaluate_clients=5,
-        min_available_clients=5,
+        fraction_evaluate=1.0,
+        min_fit_clients=min_clients,
+        min_evaluate_clients=min_clients,
+        min_available_clients=min_clients,
     )
 
     def client_fn(context: Context):
@@ -204,6 +232,17 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         num_supernodes=args.num_supernodes,
         backend_config=backend_config,  # type: ignore
     )
+
+    # After federated training completes, evaluate on test set
+    test_loader = load_test_data(
+        tokenizer, languages=languages, batch_size=args.batch_size
+    )
+    test_loss, test_accuracy = test(model, test_loader, device)
+    print("\nFinal Test Results:")
+    print(f"Test Loss: {test_loss:.4f}")
+    print(f"Test Accuracy: {test_accuracy:.4f}")
+
+    wandb.log({"test/loss": test_loss, "test/accuracy": test_accuracy})
 
 
 def main():
@@ -271,6 +310,12 @@ def main():
         default=42,
         help="Random seed for reproducibility",
     )
+    parser.add_argument(
+        "--language_set",
+        type=str,
+        default="full",
+        help="Set of languages to use: 'full', 'limited', or a single language code (e.g., 'en')",
+    )
 
     args = parser.parse_args()
 
@@ -282,6 +327,28 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+    # Determine languages based on language_set
+    if args.language_set == "full":
+        languages = ["en", "de", "es", "fr", "zh"]
+    elif args.language_set == "limited":
+        languages = ["en", "de", "es", "fr"]
+    else:
+        # Assume args.language_set is a single language code
+        if args.mode == "federated":
+            raise ValueError(
+                "Single language selection is only supported in centralized mode."
+            )
+        languages = [args.language_set]
+        available_languages = ["en", "de", "es", "fr", "zh"]
+        if languages[0] not in available_languages:
+            raise ValueError(
+                f"Unsupported language '{languages[0]}'. Available languages: {available_languages}"
+            )
+
+    # Adjust number of supernodes for federated mode based on selected languages
+    if args.mode == "federated":
+        args.num_supernodes = len(languages)
 
     # Create a unique experiment ID for grouping
     experiment_id = wandb.util.generate_id()  # type: ignore
@@ -299,6 +366,10 @@ def main():
             "lora_r": args.lora_r,
             "lora_alpha": args.lora_alpha,
             "lora_dropout": args.lora_dropout,
+            "learning_rate": args.learning_rate,
+            "seed": args.seed,
+            "language_set": args.language_set,
+            "languages": languages,
         },
         reinit=True,
     )
@@ -341,8 +412,6 @@ def main():
         target_modules=["q_lin", "v_lin"] if "distilbert" in args.model_name else None,
     )
     model = get_peft_model(model, peft_config)
-
-    languages = ["en", "de", "es", "fr", "zh"]
 
     if args.mode == "federated":
         federated_training(model, languages, tokenizer, device, args, experiment_id)
