@@ -31,7 +31,7 @@ def main():
         "--sweep_id", type=str, required=True, help="Sweep ID to run agent for"
     )
     parser.add_argument(
-        "--count", type=int, default=10, help="Number of runs to execute in the sweep"
+        "--count", type=int, default=20, help="Number of runs to execute in the sweep"
     )
     args = parser.parse_args()
 
