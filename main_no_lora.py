@@ -271,9 +271,9 @@ def main():
     ):
         model.config.pad_token_id = tokenizer.pad_token_id
 
-    # Freeze all parameters except the classification head
-    for param in model.base_model.parameters():
-        param.requires_grad = False
+    # # Freeze all parameters except the classification head
+    # for param in model.base_model.parameters():
+    #     param.requires_grad = False
 
     # Verify and print trainable parameters
     total_params = 0
