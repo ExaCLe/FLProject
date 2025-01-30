@@ -104,6 +104,34 @@ def centralized_training(model, languages, tokenizer, device, args):
 
 
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
+    # Load validation dataset once
+    validation_loader = load_validation_data(tokenizer)
+
+    def validate_global_model(model):
+        model.eval()
+        loss, accuracy = test(model, validation_loader, device)
+        wandb.log({"validation/loss": loss, "validation/accuracy": accuracy})
+        return loss, accuracy
+
+    experiment_name = args.experiment_name
+
+    class CustomFedAvg(FedAvg):
+        def aggregate_fit(self, *args, **kwargs):
+            results = super().aggregate_fit(*args, **kwargs)
+            if results is not None:
+                loss, accuracy = validate_global_model(model)
+                # Get current round number
+                # Save model checkpoint
+                model_path = save_model(model, experiment_name)
+                wandb.log(
+                    {
+                        "validation/loss": loss,
+                        "validation/accuracy": accuracy,
+                        "model_checkpoint": model_path,
+                    }
+                )
+            return results
+
     """Run federated training."""
     strategy = CustomFedAvg(
         fraction_fit=1.0,
@@ -144,6 +172,7 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         server_app=server,
         client_app=client,
         num_supernodes=args.num_supernodes,
+        backend_config=gpu_config,
     )
 
 
@@ -240,34 +269,6 @@ def main():
 
     languages = ["en", "de", "es", "fr", "ru"]
 
-    # Load validation dataset once
-    validation_loader = load_validation_data(tokenizer)
-
-    def validate_global_model(model):
-        model.eval()
-        loss, accuracy = test(model, validation_loader, device)
-        wandb.log({"validation/loss": loss, "validation/accuracy": accuracy})
-        return loss, accuracy
-
-    experiment_name = args.experiment_name
-
-    class CustomFedAvg(FedAvg):
-        def aggregate_fit(self, *args, **kwargs):
-            results = super().aggregate_fit(*args, **kwargs)
-            if results is not None:
-                loss, accuracy = validate_global_model(model)
-                # Get current round number
-                # Save model checkpoint
-                model_path = save_model(model, experiment_name)
-                wandb.log(
-                    {
-                        "validation/loss": loss,
-                        "validation/accuracy": accuracy,
-                        "model_checkpoint": model_path,
-                    }
-                )
-            return results
-
     if args.mode == "federated":
         federated_training(model, languages, tokenizer, device, args, experiment_id)
     else:
@@ -282,3 +283,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+RuntimeError: Attempting to deserialize object on CUDA device 0 but torch.cuda.device_count() is 0. Please use torch.load with map_location to map your storages to an existing device.
