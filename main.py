@@ -103,28 +103,6 @@ def centralized_training(model, languages, tokenizer, device, args):
         )
 
 
-class DeviceAgnosticFedAvg(FedAvg):
-    def __init__(self, device, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.device = device
-
-    def aggregate_fit(self, *args, **kwargs):
-        # Move current model parameters to CPU before aggregation
-        with torch.device("cpu"):
-            results = super().aggregate_fit(*args, **kwargs)
-        if results is not None:
-            loss, accuracy = validate_global_model(model)
-            model_path = save_model(model, experiment_name)
-            wandb.log(
-                {
-                    "validation/loss": loss,
-                    "validation/accuracy": accuracy,
-                    "model_checkpoint": model_path,
-                }
-            )
-        return results
-
-
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
     # Load validation dataset once
     validation_loader = load_validation_data(tokenizer)
@@ -136,6 +114,27 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         return loss, accuracy
 
     experiment_name = args.experiment_name
+
+    class DeviceAgnosticFedAvg(FedAvg):
+        def __init__(self, device, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.device = device
+
+        def aggregate_fit(self, *args, **kwargs):
+            # Move current model parameters to CPU before aggregation
+            with torch.device("cpu"):
+                results = super().aggregate_fit(*args, **kwargs)
+            if results is not None:
+                loss, accuracy = validate_global_model(model)
+                model_path = save_model(model, experiment_name)
+                wandb.log(
+                    {
+                        "validation/loss": loss,
+                        "validation/accuracy": accuracy,
+                        "model_checkpoint": model_path,
+                    }
+                )
+            return results
 
     """Run federated training."""
     strategy = DeviceAgnosticFedAvg(
@@ -169,16 +168,12 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
     server = ServerApp(server_fn=server_fn)
     client = ClientApp(client_fn=client_fn)
 
-    gpu_config = {
-        "num_cpus": 1,
-        "num_gpus": 1 if device.type in ["cuda", "mps"] else 0,
-    }
-
+    backend_config = {"client_resources": {"num_gpus": 1, "num_cpus": 1}}
     run_simulation(
         server_app=server,
         client_app=client,
         num_supernodes=args.num_supernodes,
-        backend_config=gpu_config,
+        backend_config=backend_config,
     )
 
 
