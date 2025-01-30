@@ -60,19 +60,19 @@ class GPT2FLClient(NumPyClient):
                 self.run_id = wandb.run.id  # type: ignore
 
     def get_parameters(self, config):
-        # Move model to CPU before getting parameters
-        self.model.cpu()
-        parameters = [val.cpu().numpy() for _, val in self.model.state_dict().items()]
-        # Move model back to original device
-        self.model.to(self.device)
-        return parameters
+        """Get parameters from the model, ensuring they're on CPU."""
+        with torch.device("cpu"):
+            return [
+                val.cpu().detach().numpy() for _, val in self.model.state_dict().items()
+            ]
 
     def set_parameters(self, parameters, config):
+        """Set parameters in the model, handling device placement carefully."""
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        # First load parameters to CPU, then move to target device
-        state_dict = {k: torch.tensor(v) for k, v in params_dict}
+        with torch.device("cpu"):
+            state_dict = {k: torch.tensor(v) for k, v in params_dict}
         self.model.load_state_dict(state_dict, strict=True)
-        self.model.to(self.device)
+        self.model = self.model.to(self.device)
 
     def fit(self, parameters, config):
         self.set_parameters(parameters, config)
