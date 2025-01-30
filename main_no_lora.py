@@ -264,6 +264,13 @@ def main():
         num_labels=3,
     )
 
+    # Set pad token ID if needed
+    if (
+        hasattr(model.config, "pad_token_id")
+        and model_config["pad_token_strategy"] == "eos_token"
+    ):
+        model.config.pad_token_id = tokenizer.pad_token_id
+
     # Freeze all parameters except the classification head
     for param in model.base_model.parameters():
         param.requires_grad = False
