@@ -3,5 +3,5 @@
 ### Run Initial Federated Sweeps
 
 ```bash
-python run_agent.py --sweep_id 01njzhtx ; python run_agent.py --sweep_id x2t2lw5x ; python run_agent.py --sweep_id 3uaed1yv ; python run_agent.py --sweep_id l4phl015
+python run_agent.py --sweep_id k00i5wev ; python run_agent.py --sweep_id oiwhga1l ; python run_agent.py --sweep_id 960hcuai ; python run_agent.py --sweep_id v235yhwo
 ```

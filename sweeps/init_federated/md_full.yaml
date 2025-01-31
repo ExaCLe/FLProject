@@ -1,7 +1,7 @@
 program: main.py
 method: bayes
 metric:
-  name: validation/accuracy
+  name: aggregated/eval_accuracy
   goal: maximize
 parameters:
   lora_r:
