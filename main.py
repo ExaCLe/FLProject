@@ -231,16 +231,6 @@ class MetricsAggregationStrategy(FedAvg):
 
 
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
-    # Load validation dataset once with correct languages
-    validation_loader = load_validation_data(tokenizer, languages=languages)
-
-    def validate_global_model(model):
-        model.eval()
-        loss, accuracy = test(model, validation_loader, device)
-        wandb.log({"validation/loss": loss, "validation/accuracy": accuracy})
-        return loss, accuracy
-
-    experiment_name = args.experiment_name
     min_clients = len(languages)
     # Update strategy initialization to use new class
     strategy = MetricsAggregationStrategy(
@@ -256,7 +246,9 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         partition_id: int = int(context.node_config["partition-id"])
         language = languages[partition_id % len(languages)]
         trainloader = load_data(language, tokenizer, batch_size=args.batch_size)
-        testloader = load_data(language, tokenizer, batch_size=args.batch_size)
+        testloader = load_validation_data(
+            language, tokenizer, batch_size=args.batch_size
+        )
         return GPT2FLClient(
             model,
             trainloader,
