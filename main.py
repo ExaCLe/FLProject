@@ -157,6 +157,79 @@ def centralized_training(model, languages, tokenizer, device, args):
     print(f"Final validation accuracy: {best_val_accuracy:.4f}")
 
 
+class MetricsAggregationStrategy(FedAvg):
+    def __init__(self, device, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.device = device
+        self.current_round = 0
+
+    def aggregate_fit(self, server_round, results, failures):
+        # Increment round counter
+        self.current_round = server_round
+
+        # Aggregate parameters as usual
+        aggregated_result = super().aggregate_fit(server_round, results, failures)
+
+        if aggregated_result is not None:
+            # Extract metrics from each client
+            client_metrics = [res.metrics for _, res in results]
+
+            # Calculate average metrics
+            avg_loss = sum(m["train_loss"] for m in client_metrics) / len(  # type: ignore
+                client_metrics
+            )
+            avg_accuracy = sum(m["train_accuracy"] for m in client_metrics) / len(  # type: ignore
+                client_metrics
+            )
+
+            # Log aggregated metrics
+            wandb.log(
+                {
+                    "round": server_round,
+                    "aggregated/train_loss": avg_loss,
+                    "aggregated/train_accuracy": avg_accuracy,
+                    # Add individual client metrics
+                    **{
+                        f"client_{m['client_id']}/train_loss": m["train_loss"]
+                        for m in client_metrics
+                    },
+                    **{
+                        f"client_{m['client_id']}/train_accuracy": m["train_accuracy"]
+                        for m in client_metrics
+                    },
+                }
+            )
+
+        return aggregated_result
+
+    def aggregate_evaluate(self, server_round, results, failures):
+        aggregated_result = super().aggregate_evaluate(server_round, results, failures)
+
+        if results:
+            # Extract metrics from each client
+            client_metrics = [res.metrics for _, res in results]
+
+            # Calculate average accuracy
+            avg_accuracy = sum(m["accuracy"] for m in client_metrics) / len(  # type: ignore
+                client_metrics
+            )
+
+            # Log aggregated metrics
+            wandb.log(
+                {
+                    "round": server_round,
+                    "aggregated/eval_accuracy": avg_accuracy,
+                    # Add individual client metrics
+                    **{
+                        f"client_{m['client_id']}/eval_accuracy": m["accuracy"]
+                        for m in client_metrics
+                    },
+                }
+            )
+
+        return aggregated_result
+
+
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
     # Load validation dataset once with correct languages
     validation_loader = load_validation_data(tokenizer, languages=languages)
@@ -168,32 +241,9 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         return loss, accuracy
 
     experiment_name = args.experiment_name
-
-    class DeviceAgnosticFedAvg(FedAvg):
-        def __init__(self, device, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.device = device
-
-        def aggregate_fit(self, *args, **kwargs):
-            # Move current model parameters to CPU before aggregation
-            with torch.device("cpu"):
-                results = super().aggregate_fit(*args, **kwargs)
-            if results is not None:
-                loss, accuracy = validate_global_model(model)
-                model_path = save_model(model, experiment_name)
-                wandb.log(
-                    {
-                        "validation/loss": loss,
-                        "validation/accuracy": accuracy,
-                        "model_checkpoint": model_path,
-                    }
-                )
-            return results
-
-    """Run federated training."""
-    # Update strategy parameters based on number of languages
     min_clients = len(languages)
-    strategy = DeviceAgnosticFedAvg(
+    # Update strategy initialization to use new class
+    strategy = MetricsAggregationStrategy(
         device=device,
         fraction_fit=1.0,
         fraction_evaluate=1.0,
@@ -213,8 +263,6 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
             testloader,
             device,
             client_id=f"{language}_{partition_id}",
-            wandb_group=experiment_id,  # Pass the group ID to client
-            experiment_name=args.experiment_name,
         ).to_client()
 
     def server_fn(context: Context) -> ServerAppComponents:
@@ -301,7 +349,7 @@ def main(config):
         config.num_supernodes = len(languages)
 
     # Create a unique experiment ID for grouping
-    experiment_id = wandb.util.generate_id()
+    experiment_id = wandb.util.generate_id()  # type: ignore
 
     # Initialize wandb for the server
     wandb.init(
