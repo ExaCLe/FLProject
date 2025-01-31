@@ -33,4 +33,4 @@ parameters:
   experiment_name:
     value: "auto" # Will be overwritten by init_sweep.py
   language_set:
-    value: "de"
+    value: "zh"

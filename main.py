@@ -225,7 +225,10 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
     client = ClientApp(client_fn=client_fn)
 
     backend_config = {
-        "client_resources": {"num_gpus": 1 if device == "cuda" else 0, "num_cpus": 1}
+        "client_resources": {
+            "num_gpus": 1 if device == torch.device("cuda") else 0,
+            "num_cpus": 1,
+        }
     }
     run_simulation(
         server_app=server,
