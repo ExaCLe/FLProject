@@ -162,80 +162,57 @@ class MetricsAggregationStrategy(FedAvg):
         super().__init__(*args, **kwargs)
         self.device = device
         self.current_round = 0
+        self.global_weights = None  # New attribute
 
     def aggregate_fit(self, server_round, results, failures):
-        # Increment round counter
         self.current_round = server_round
-
-        # Aggregate parameters as usual
         aggregated_result = super().aggregate_fit(server_round, results, failures)
-
         if aggregated_result is not None:
-            # Extract metrics from each client
+            self.global_weights = aggregated_result  # Store latest aggregated weights
+            # ...existing metric aggregation and logging...
             client_metrics = [res.metrics for _, res in results]
-
-            if len(client_metrics) == 0:
-                return aggregated_result
-
-            # Calculate average metrics
-            avg_loss = sum(m["train_loss"] for m in client_metrics) / len(  # type: ignore
-                client_metrics
-            )
-            avg_accuracy = sum(m["train_accuracy"] for m in client_metrics) / len(  # type: ignore
-                client_metrics
-            )
-
-            # Log aggregated metrics
-            wandb.log(
-                {
-                    "round": server_round,
-                    "aggregated/train_loss": avg_loss,
-                    "aggregated/train_accuracy": avg_accuracy,
-                    # Add individual client metrics
-                    **{
-                        f"client_{m['client_id']}/train_loss": m["train_loss"]
-                        for m in client_metrics
-                    },
-                    **{
-                        f"client_{m['client_id']}/train_accuracy": m["train_accuracy"]
-                        for m in client_metrics
-                    },
-                }
-            )
-
+            if client_metrics:
+                avg_loss = sum(m["train_loss"] for m in client_metrics) / len(client_metrics)  # type: ignore
+                avg_accuracy = sum(m["train_accuracy"] for m in client_metrics) / len(client_metrics)  # type: ignore
+                wandb.log(
+                    {
+                        "round": server_round,
+                        "aggregated/train_loss": avg_loss,
+                        "aggregated/train_accuracy": avg_accuracy,
+                        **{
+                            f"client_{m['client_id']}/train_loss": m["train_loss"]
+                            for m in client_metrics
+                        },
+                        **{
+                            f"client_{m['client_id']}/train_accuracy": m[
+                                "train_accuracy"
+                            ]
+                            for m in client_metrics
+                        },
+                    }
+                )
         return aggregated_result
 
     def aggregate_evaluate(self, server_round, results, failures):
         aggregated_result = super().aggregate_evaluate(server_round, results, failures)
-
         if results:
-            # Extract metrics from each client
             client_metrics = [res.metrics for _, res in results]
-
-            # Calculate average accuracy
-            avg_accuracy = sum(m["accuracy"] for m in client_metrics) / len(  # type: ignore
-                client_metrics
-            )
-
-            # Log aggregated metrics
+            avg_accuracy = sum(m["accuracy"] for m in client_metrics) / len(client_metrics)  # type: ignore
             wandb.log(
                 {
                     "round": server_round,
                     "aggregated/eval_accuracy": avg_accuracy,
-                    # Add individual client metrics
                     **{
                         f"client_{m['client_id']}/eval_accuracy": m["accuracy"]
                         for m in client_metrics
                     },
                 }
             )
-
         return aggregated_result
 
 
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
     min_clients = len(languages)
-    # Update strategy initialization to use new class
     strategy = MetricsAggregationStrategy(
         device=device,
         fraction_fit=1.0,
@@ -250,7 +227,7 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         language = languages[partition_id % len(languages)]
         trainloader = load_data(language, tokenizer, batch_size=args.batch_size)
         testloader = load_validation_data(
-            language, tokenizer, batch_size=args.batch_size
+            languages, tokenizer, batch_size=args.batch_size
         )
         return GPT2FLClient(
             model,
@@ -280,7 +257,16 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         backend_config=backend_config,  # type: ignore
     )
 
-    # After federated training completes, evaluate on test set
+    # New code: If final global weights exist, load them into the model before final evaluation.
+    if strategy.global_weights is not None:
+        # Build new state dict from the aggregated list of weight values
+        new_state = {}
+        model_keys = list(model.state_dict().keys())
+        for key, weight in zip(model_keys, strategy.global_weights):
+            new_state[key] = torch.tensor(weight).to(device)
+        model.load_state_dict(new_state)
+
+    # After simulation, evaluate on test set
     test_loader = load_test_data(
         tokenizer, languages=languages, batch_size=args.batch_size
     )
