@@ -24,6 +24,7 @@ from datetime import datetime
 from client import GPT2FLClient
 from dataset import load_data
 from model import test, train
+from semantic_alignment import semantic_alignment_training  # import the function
 
 MODEL_CONFIGS = {
     "gpt2": {
@@ -169,7 +170,7 @@ class MetricsAggregationStrategy(FedAvg):
         aggregated_result = super().aggregate_fit(server_round, results, failures)
         if aggregated_result is not None:
             self.global_weights = aggregated_result  # Store latest aggregated weights
-            # ...existing metric aggregation and logging...
+
             client_metrics = [res.metrics for _, res in results]
             if client_metrics:
                 avg_loss = sum(m["train_loss"] for m in client_metrics) / len(client_metrics)  # type: ignore
@@ -244,13 +245,19 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         testloader = load_validation_data(
             tokenizer, languages, batch_size=args.batch_size
         )
-        return GPT2FLClient(
-            model,
-            trainloader,
-            testloader,
-            device,
+        client = GPT2FLClient(
+            model=model,
+            trainloader=trainloader,
+            testloader=testloader,
+            device=device,
             client_id=f"{language}_{partition_id}",
-        ).to_client()
+            sa_interval=args.sa_interval,
+            sa_epochs=args.sa_epochs,
+            sa_samples=args.sa_samples,
+            language=language,
+            tokenizer=tokenizer,
+        )
+        return client.to_client()
 
     def server_fn(context: Context) -> ServerAppComponents:
         config = ServerConfig(num_rounds=args.num_rounds)
@@ -484,6 +491,25 @@ if __name__ == "__main__":
         type=str,
         default="full",
         help="Set of languages to use: 'full', 'limited', or a single language code (e.g., 'en')",
+    )
+    # In the argument parser section, add new semantic alignment hyperparameters:
+    parser.add_argument(
+        "--sa_interval",
+        type=float,
+        default=1.0,
+        help="Fraction of an epoch (if <1) or full batches (if >=1) after which to run semantic alignment training.",
+    )
+    parser.add_argument(
+        "--sa_epochs",
+        type=int,
+        default=1,
+        help="Number of epochs to run semantic alignment training.",
+    )
+    parser.add_argument(
+        "--sa_samples",
+        type=int,
+        default=0,
+        help="Number of samples to choose for semantic alignment training. If 0, semantic alignment is skipped.",
     )
 
     args = parser.parse_args()

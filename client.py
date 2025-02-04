@@ -10,16 +10,23 @@ class GPT2FLClient(NumPyClient):
         trainloader,
         testloader,
         device,
-        client_id=None,
+        client_id: str,
+        sa_interval: float,
+        sa_epochs: int,
+        sa_samples: int,
+        language: str,
+        tokenizer,
     ):
-        self.model = model
+        self.model = model.to(device)
         self.trainloader = trainloader
         self.testloader = testloader
         self.device = device
         self.client_id = client_id
-
-        # Ensure model is on correct device
-        self.model = self.model.to(device)
+        self.sa_interval = sa_interval
+        self.sa_epochs = sa_epochs
+        self.sa_samples = sa_samples
+        self.language = language
+        self.tokenizer = tokenizer
 
     def get_parameters(self, config):
         return [
@@ -35,9 +42,22 @@ class GPT2FLClient(NumPyClient):
 
     def fit(self, parameters, config):
         self.set_parameters(parameters, config)
-        metrics = train(self.model, self.trainloader, epochs=1, device=self.device)
+        lr = config.get("learning_rate", 5e-5)
 
-        # Return parameters, number of datapoints, and metrics
+        # Use the train function with all necessary parameters
+        metrics = train(
+            self.model,
+            self.trainloader,
+            epochs=1,
+            device=self.device,
+            learning_rate=lr,  # type: ignore
+            sa_interval=self.sa_interval,
+            sa_samples=self.sa_samples,
+            sa_epochs=self.sa_epochs,
+            language=self.language,
+            tokenizer=self.tokenizer,
+        )
+
         return (
             self.get_parameters(config),
             len(self.trainloader.dataset),
@@ -51,8 +71,6 @@ class GPT2FLClient(NumPyClient):
     def evaluate(self, parameters, config):
         self.set_parameters(parameters, config)
         loss, accuracy = test(self.model, self.testloader, device=self.device)
-
-        # Return loss, number of datapoints, and metrics
         return (
             loss,
             len(self.testloader.dataset),
