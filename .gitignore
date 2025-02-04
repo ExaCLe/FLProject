@@ -5,3 +5,5 @@ tutorial/
 .wandb_runs/ 
 wandb/
 models/
+data/semantic_alignment/*
+!data/semantic_alignment/*.csv
