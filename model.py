@@ -63,7 +63,7 @@ def train(
             num_batches += 1
 
             # Check if we should do semantic alignment
-            if sa_samples > 0 and batch_counter == sa_threshold:
+            if sa_samples > 0 and batch_counter == sa_threshold and language != "en":
                 print(
                     f"\nPerforming semantic alignment at batch {batch_counter}/{total_batches}"
                 )
