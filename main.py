@@ -227,7 +227,7 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         language = languages[partition_id % len(languages)]
         trainloader = load_data(language, tokenizer, batch_size=args.batch_size)
         testloader = load_validation_data(
-            languages, tokenizer, batch_size=args.batch_size
+            tokenizer, languages, batch_size=args.batch_size
         )
         return GPT2FLClient(
             model,
