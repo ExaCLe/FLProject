@@ -211,6 +211,21 @@ class MetricsAggregationStrategy(FedAvg):
         return aggregated_result
 
 
+def convert_weight(weight, target_dtype, device):
+    print(type(weight))
+    # If weight is an instance of Parameters, convert its first ByteBuffer to a numpy array.
+    if hasattr(weight, "tensors"):
+        # Example conversion: adjust dtype mapping as needed based on weight.tensorType.
+        buf = weight.tensors[0]
+        weight_np = np.frombuffer(buf, dtype=np.float32)  # adjust dtype if necessary
+    else:
+        weight_np = weight.cpu().numpy() if isinstance(weight, torch.Tensor) else weight
+    return torch.as_tensor(weight_np, dtype=target_dtype, device=device)
+
+
+from flwr.common import parameters_to_ndarrays, Parameters
+
+
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
     min_clients = len(languages)
     strategy = MetricsAggregationStrategy(
@@ -258,12 +273,17 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
     )
 
     # New code: If final global weights exist, load them into the model before final evaluation.
-    if strategy.global_weights is not None:
-        # Build new state dict from the aggregated list of weight values
+    if strategy.global_weights is not None and strategy.global_weights[0] is not None:
+        # Now convert Parameters to numpy arrays
+        ndarrays = parameters_to_ndarrays(strategy.global_weights[0])
+
+        # Load state into model
         new_state = {}
-        model_keys = list(model.state_dict().keys())
-        for key, weight in zip(model_keys, strategy.global_weights):
-            new_state[key] = torch.tensor(weight).to(device)
+        model_state = model.state_dict()
+        for key, array in zip(model_state.keys(), ndarrays):
+            new_state[key] = torch.as_tensor(
+                array, dtype=model_state[key].dtype, device=device
+            )
         model.load_state_dict(new_state)
 
     # After simulation, evaluate on test set
