@@ -174,6 +174,9 @@ class MetricsAggregationStrategy(FedAvg):
             # Extract metrics from each client
             client_metrics = [res.metrics for _, res in results]
 
+            if len(client_metrics) == 0:
+                return aggregated_result
+
             # Calculate average metrics
             avg_loss = sum(m["train_loss"] for m in client_metrics) / len(  # type: ignore
                 client_metrics
