@@ -34,7 +34,7 @@ parameters:
     value: "auto" # Will be overwritten by init_sweep.py
   language_set:
     value: "limited"
-  sa_intervall:
+  sa_interval:
     values: [0.2, 0.33, 0.5]
   sa_epochs:
     values: [3, 5, 10]

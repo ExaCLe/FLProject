@@ -32,7 +32,7 @@ parameters:
     value: 5
   experiment_name:
     value: "auto" # Will be overwritten by init_sweep.py
-  sa_intervall:
+  sa_interval:
     value: 0.5
   sa_epochs:
     values: [1, 2, 3]
