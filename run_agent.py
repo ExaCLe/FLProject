@@ -16,6 +16,9 @@ DEFAULT_CONFIG = {
     "learning_rate": 5e-5,
     "seed": 42,
     "language_set": "full",
+    "sa_samples": 0,
+    "sa_intervall": 0.5,
+    "sa_epochs": 1,
 }
 
 
