@@ -17,7 +17,7 @@ DEFAULT_CONFIG = {
     "seed": 42,
     "language_set": "full",
     "sa_samples": 0,
-    "sa_intervall": 0.5,
+    "sa_interval": 0.5,
     "sa_epochs": 1,
 }
 
