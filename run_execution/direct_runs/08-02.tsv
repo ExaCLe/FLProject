@@ -1,0 +1,5 @@
+model_name	mode	batch_size	num_rounds	lora_r	lora_alpha	lora_dropout	learning_rate	seed	language_set	sa_samples	sa_interval	sa_epochs	experiment_name
+multi-distilbert	centralized	16	20	26	55	0.32069586424218405	1.00294254879006	42	limited	0	0.5	1	md_lim_cen_20_epochs
+multi-distilbert	centralized	8	20	28	62	0.4294645450669477	1.0009546244950625	42	full	0	0.5	1	md_ful_cen_20_epochs
+distilbert	centralized	8	20	5	56	0.27566098960874164	0.275660989608741641.0004770633929596	42	limited	0	0.5	1	d_lim_cen_20_epochs
+distilbert	centralized	16	20	16	64	0.31687605772514293	1.0092780800203704	42	full	0	0.5	1	d_ful_cen_20_epochs

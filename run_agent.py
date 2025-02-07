@@ -22,15 +22,8 @@ DEFAULT_CONFIG = {
 }
 
 
-def run_agent():
-    parser = argparse.ArgumentParser(description="Run a W&B sweep agent")
-    parser.add_argument(
-        "--sweep_id", type=str, required=True, help="Sweep ID to run agent for"
-    )
-    parser.add_argument(
-        "--count", type=int, default=20, help="Number of runs to execute in the sweep"
-    )
-    args = parser.parse_args()
+def run_sweep(sweep_id: str, count: int):
+    """Run a W&B sweep with the given ID and count."""
 
     def run_training():
         # Initialize wandb for this run
@@ -46,14 +39,21 @@ def run_agent():
         # Convert to SimpleNamespace
         config = SimpleNamespace(**config)
 
-        # Run the training directly
+        # Run the training
         main(config)
 
     # Start the sweep agent
-    wandb.agent(
-        args.sweep_id, function=run_training, count=args.count, project="federated-xnli"
-    )
+    wandb.agent(sweep_id, function=run_training, count=count, project="federated-xnli")
 
 
 if __name__ == "__main__":
-    run_agent()
+    parser = argparse.ArgumentParser(description="Run a W&B sweep agent")
+    parser.add_argument(
+        "--sweep_id", type=str, required=True, help="Sweep ID to run agent for"
+    )
+    parser.add_argument(
+        "--count", type=int, default=20, help="Number of runs to execute in the sweep"
+    )
+    args = parser.parse_args()
+
+    run_sweep(args.sweep_id, args.count)
