@@ -5,13 +5,13 @@ metric:
   goal: maximize
 parameters:
   lora_r:
-    value: 19
+    value: 17
   lora_alpha:
-    value: 41
+    value: 60
   learning_rate:
-    value: 1.0092977195802546
+    value: 0.0001821196009874809
   lora_dropout:
-    value: 0.2706625916896399
+    value: 0.2986260332295175
   batch_size:
     value: 8
   model_name:

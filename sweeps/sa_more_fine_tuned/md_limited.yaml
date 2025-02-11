@@ -7,13 +7,13 @@ parameters:
   lora_r:
     value: 10
   lora_alpha:
-    value: 43
+    value: 36
   learning_rate:
-    value: 1.0000342534633289
+    value: 0.00000146143221867002
   batch_size:
     value: 8
   lora_dropout:
-    value: 0.12443481303727622
+    value: 0.07908147675609378
   model_name:
     value: "multi-distilbert"
   mode:

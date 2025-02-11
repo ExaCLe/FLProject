@@ -5,15 +5,15 @@ metric:
   goal: maximize
 parameters:
   lora_r:
-    value: 6
+    value: 13
   lora_alpha:
     value: 63
   learning_rate:
-    value: 1.0065052270839685
+    value: 0.00000127948349136098
   batch_size:
     value: 8
   lora_dropout:
-    value: 0.2690546651456782
+    value: 0.2345640822590399
   model_name:
     value: "distilbert"
   mode:
