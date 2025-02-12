@@ -1,5 +1,5 @@
 model_name	mode	batch_size	num_rounds	lora_r	lora_alpha	lora_dropout	learning_rate	seed	language_set	sa_samples	sa_interval	sa_epochs	num_clients_per_language
-distilbert	federated	8	20	13	63	0.2345640822590399	0.00000127948349136098	42	full	0	0.5	1	2		
+distilbert	federated	8	20	13	63	0.2345640822590399	0.00000127948349136098	42	full	0	0.5	1	2
 distilbert	federated	8	20	17	60	0.2986260332295175	0.00000127948349136098	42	limited	0	0.5	1	2
 distilbert	federated	8	20	13	63	0.2345640822590399	0.00000127948349136098	42	full	0	0.5	1	4
 distilbert	federated	8	20	17	60	0.2986260332295175	0.00000127948349136098	42	limited	0	0.5	1	4
