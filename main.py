@@ -348,6 +348,13 @@ def main(config):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+    # Update num_supernodes based on number of clients per language
+    if config.mode == "federated":
+        if config.language_set == "full":
+            config.num_supernodes = 5 * config.num_clients_per_language  # 5 languages
+        elif config.language_set == "limited":
+            config.num_supernodes = 4 * config.num_clients_per_language  # 4 languages
+
     # Determine languages based on language_set
     if config.language_set == "full":
         languages = ["en", "de", "es", "fr", "zh"]
@@ -528,13 +535,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    # Update num_supernodes based on number of clients per language
-    if args.mode == "federated":
-        if args.language_set == "full":
-            args.num_supernodes = 5 * args.num_clients_per_language  # 5 languages
-        elif args.language_set == "limited":
-            args.num_supernodes = 4 * args.num_clients_per_language  # 4 languages
 
     # Generate experiment name
     args.experiment_name = generate_run_name(vars(args))
