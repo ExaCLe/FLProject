@@ -32,24 +32,58 @@ class CustomTextDataset(Dataset):
         )
 
 
-def load_data(language, tokenizer, max_length=128, batch_size=8):
-    # This CSV should contain XNLI data filtered by language
-    # Columns: sentence1, sentence2, gold_label
-    # For example: "entailment", "neutral", "contradiction"
+def load_data(
+    language: str,
+    tokenizer,
+    batch_size: int = 8,
+    partition_id: int = 0,
+    total_partitions: int = 1,
+    max_length: int = 128,
+):
+    """
+    Load and partition training data for a specific language from the main CSV.
+
+    Args:
+        language: Language code to filter by
+        tokenizer: Tokenizer to use
+        batch_size: Batch size for DataLoader
+        partition_id: Which partition of the data to load (0 to total_partitions-1)
+        total_partitions: Total number of partitions to split data into
+        max_length: Max sequence length for tokenization
+    """
+    # Load the main XNLI training data
     csv_path = "./data/xnli/xnli_filtered_dev.csv"
     df = pd.read_csv(csv_path)
+
+    # Filter by language first
     df = df[df["language"] == language]
 
-    # Map gold_label to integers
+    # Then partition the language-specific data
+    total_samples = len(df)
+    samples_per_partition = total_samples // total_partitions
+    start_idx = partition_id * samples_per_partition
+    end_idx = (
+        start_idx + samples_per_partition
+        if partition_id < total_partitions - 1
+        else total_samples
+    )
+
+    # Select partition
+    df = df.iloc[start_idx:end_idx]
+
+    # Map labels to integers
     label_map = {"entailment": 0, "neutral": 1, "contradiction": 2}
     labels = df["gold_label"].map(label_map).tolist()
 
+    # Create sentence pairs
     sentence_pairs = list(zip(df["sentence1"], df["sentence2"]))
+
+    # Create dataset and dataloader
     dataset = CustomTextDataset(sentence_pairs, labels, tokenizer, max_length)
-    # Add drop_last=True to ensure consistent batch sizes
     dataloader = DataLoader(
         dataset, batch_size=batch_size, shuffle=True, drop_last=True
     )
+
     return dataloader
 
 

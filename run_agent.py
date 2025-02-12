@@ -19,6 +19,7 @@ DEFAULT_CONFIG = {
     "sa_samples": 0,
     "sa_interval": 0.5,
     "sa_epochs": 1,
+    "num_clients_per_language": 1,  # Add default value
 }
 
 

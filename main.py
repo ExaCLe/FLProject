@@ -228,23 +228,36 @@ from flwr.common import parameters_to_ndarrays, Parameters
 
 
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
-    min_clients = len(languages)
+    # Calculate total clients (languages * clients per language)
+    total_clients = len(languages) * args.num_clients_per_language
+
     strategy = MetricsAggregationStrategy(
         device=device,
         fraction_fit=1.0,
         fraction_evaluate=1.0,
-        min_fit_clients=min_clients,
-        min_evaluate_clients=min_clients,
-        min_available_clients=min_clients,
+        min_fit_clients=total_clients,
+        min_evaluate_clients=total_clients,
+        min_available_clients=total_clients,
     )
 
     def client_fn(context: Context):
         partition_id: int = int(context.node_config["partition-id"])
-        language = languages[partition_id % len(languages)]
-        trainloader = load_data(language, tokenizer, batch_size=args.batch_size)
+        language_idx = partition_id // args.num_clients_per_language
+        client_idx = partition_id % args.num_clients_per_language
+        language = languages[language_idx]
+
+        # Load data with partition information
+        trainloader = load_data(
+            language,
+            tokenizer,
+            batch_size=args.batch_size,
+            partition_id=client_idx,
+            total_partitions=args.num_clients_per_language,
+        )
         testloader = load_validation_data(
             tokenizer, languages, batch_size=args.batch_size
         )
+
         client = GPT2FLClient(
             model=model,
             trainloader=trainloader,
@@ -351,10 +364,6 @@ def main(config):
             raise ValueError(
                 f"Unsupported language '{languages[0]}'. Available languages: {available_languages}"
             )
-
-    # Adjust number of supernodes for federated mode based on selected languages
-    if config.mode == "federated":
-        config.num_supernodes = len(languages)
 
     # Create a unique experiment ID for grouping
     experiment_id = wandb.util.generate_id()  # type: ignore
@@ -511,8 +520,21 @@ if __name__ == "__main__":
         default=0,
         help="Number of samples to choose for semantic alignment training. If 0, semantic alignment is skipped.",
     )
+    parser.add_argument(
+        "--num_clients_per_language",
+        type=int,
+        default=1,
+        help="Number of clients per language (default: 1)",
+    )
 
     args = parser.parse_args()
+
+    # Update num_supernodes based on number of clients per language
+    if args.mode == "federated":
+        if args.language_set == "full":
+            args.num_supernodes = 5 * args.num_clients_per_language  # 5 languages
+        elif args.language_set == "limited":
+            args.num_supernodes = 4 * args.num_clients_per_language  # 4 languages
 
     # Generate experiment name
     args.experiment_name = generate_run_name(vars(args))
