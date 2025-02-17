@@ -16,6 +16,7 @@ class GPT2FLClient(NumPyClient):
         sa_samples: int,
         language: str,
         tokenizer,
+        epochs_per_client: int,
     ):
         self.model = model.to(device)
         self.trainloader = trainloader
@@ -27,6 +28,7 @@ class GPT2FLClient(NumPyClient):
         self.sa_samples = sa_samples
         self.language = language
         self.tokenizer = tokenizer
+        self.epochs_per_client = epochs_per_client
 
     def get_parameters(self, config):
         return [
@@ -44,11 +46,10 @@ class GPT2FLClient(NumPyClient):
         self.set_parameters(parameters, config)
         lr = config.get("learning_rate", 5e-5)
 
-        # Use the train function with all necessary parameters
         metrics = train(
             self.model,
             self.trainloader,
-            epochs=1,
+            epochs=self.epochs_per_client,  # Use instance variable instead of config
             device=self.device,
             learning_rate=lr,  # type: ignore
             sa_interval=self.sa_interval,

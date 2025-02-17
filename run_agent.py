@@ -20,6 +20,7 @@ DEFAULT_CONFIG = {
     "sa_interval": 0.5,
     "sa_epochs": 1,
     "num_clients_per_language": 1,  # Add default value
+    "epochs_per_client": 1,  # Add default value
 }
 
 

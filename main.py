@@ -269,6 +269,7 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
             sa_samples=args.sa_samples,
             language=language,
             tokenizer=tokenizer,
+            epochs_per_client=args.epochs_per_client,  # Add this parameter
         )
         return client.to_client()
 
@@ -532,6 +533,12 @@ if __name__ == "__main__":
         type=int,
         default=1,
         help="Number of clients per language (default: 1)",
+    )
+    parser.add_argument(
+        "--epochs_per_client",
+        type=int,
+        default=1,
+        help="Number of epochs to train each client for per round",
     )
 
     args = parser.parse_args()
