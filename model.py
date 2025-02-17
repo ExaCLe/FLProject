@@ -30,13 +30,9 @@ def train(
 
     total_batches = len(trainloader)
     # Calculate after how many batches to do semantic alignment
-    sa_threshold = (
-        int(total_batches * sa_interval)
-        if sa_interval < 1
-        else int(sa_interval * total_batches)
-    )
+    sa_threshold = int(total_batches * sa_interval)
 
-    for epoch in range(epochs):
+    for _ in range(epochs):
         batch_counter = 0
         for batch in tqdm(trainloader):
             batch_counter += 1
@@ -63,7 +59,11 @@ def train(
             num_batches += 1
 
             # Check if we should do semantic alignment
-            if sa_samples > 0 and batch_counter == sa_threshold and language != "en":
+            if (
+                sa_samples > 0
+                and batch_counter % sa_threshold == 0
+                and language != "en"
+            ):
                 print(
                     f"\nPerforming semantic alignment at batch {batch_counter}/{total_batches}"
                 )
