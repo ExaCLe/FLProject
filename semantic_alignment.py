@@ -1,5 +1,4 @@
 import os
-import random
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -10,7 +9,6 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     DataCollatorForLanguageModeling,
-    AdamW,
 )
 from peft.tuners.lora import LoraConfig
 from peft.mapping import get_peft_model
@@ -19,6 +17,17 @@ from torch.nn.functional import cosine_similarity
 
 
 class MLMDataset(Dataset):
+    """Dataset for masked language modeling with parallel text pairs.
+
+    This dataset handles pairs of texts in different languages, preparing them
+    for masked language modeling tasks during semantic alignment training.
+
+    Args:
+        first_texts (list): First set of texts in the parallel corpus
+        second_texts (list): Second set of texts (translations) in the parallel corpus
+        tokenizer: Tokenizer for text processing
+    """
+
     def __init__(self, first_texts, second_texts, tokenizer):
         # Convert all texts to strings and handle potential NaN values
         self.first_texts = [str(text) for text in first_texts]
@@ -26,6 +35,14 @@ class MLMDataset(Dataset):
         self.tokenizer = tokenizer
 
     def __getitem__(self, idx):
+        """Get a tokenized text pair at the specified index.
+
+        Args:
+            idx (int): Index of the text pair to retrieve
+
+        Returns:
+            dict: Tokenized inputs including input_ids and attention_mask
+        """
         # Ensure we're passing strings to the tokenizer
         first_text = str(self.first_texts[idx])
         second_text = str(self.second_texts[idx])
@@ -41,11 +58,28 @@ class MLMDataset(Dataset):
         return {k: v.squeeze(0) for k, v in encodings.items()}
 
     def __len__(self):
+        """Get the total number of text pairs in the dataset.
+
+        Returns:
+            int: Number of text pairs
+        """
         return len(self.first_texts)
 
 
 def compute_pair_similarities(model, texts_1, texts_2, tokenizer, device, num_pairs=5):
-    """Compute cosine similarities between encoded text pairs."""
+    """Compute semantic similarities between pairs of texts using cosine similarity.
+
+    Args:
+        model: Model to use for text encoding
+        texts_1 (list): First set of texts
+        texts_2 (list): Second set of texts (parallel to first set)
+        tokenizer: Tokenizer for processing texts
+        device: Device to run computations on
+        num_pairs (int, optional): Number of pairs to compute similarities for. Defaults to 5
+
+    Returns:
+        float: Average cosine similarity across the text pairs
+    """
     model.eval()
     similarities = []
 
@@ -75,13 +109,24 @@ def semantic_alignment_training(
     num_epochs: int = 2,
     batch_size: int = 8,
 ):
-    """
-    Train model with masked language modeling on semantic alignment data.
+    """Train model for cross-lingual semantic alignment using masked language modeling.
 
-    Parameters:
-        model: the model to fine-tune.
-        language: language paired with English (e.g., "de", "fr") used in the CSV.
-        select_samples: number of samples to randomly choose and split between the two directions.
+    This function fine-tunes a model using parallel text pairs to improve the alignment
+    between semantic representations across languages.
+
+    Args:
+        model: Model to fine-tune
+        language (str): Target language code (e.g., "de", "fr")
+        select_samples (int): Number of parallel text pairs to use for training
+        tokenizer: Tokenizer for text processing
+        num_epochs (int, optional): Number of training epochs. Defaults to 2
+        batch_size (int, optional): Training batch size. Defaults to 8
+
+    Returns:
+        model: Fine-tuned model with improved cross-lingual alignment
+
+    Raises:
+        ValueError: If there aren't enough samples in the dataset
     """
     data_folder = "./data/semantic_alignment/"
     csv_path = os.path.join(data_folder, f"{language}.csv")
@@ -180,7 +225,15 @@ def semantic_alignment_training(
 
 
 def get_sample_texts(language: str, num_samples: int = 5):
-    """Get sample texts from the dataset for similarity comparison."""
+    """Retrieve sample parallel texts from the dataset for evaluation.
+
+    Args:
+        language (str): Language code for the target language
+        num_samples (int, optional): Number of text pairs to retrieve. Defaults to 5
+
+    Returns:
+        dict: Dictionary with language codes as keys and lists of texts as values
+    """
     data_folder = "./data/semantic_alignment/"
     csv_path = os.path.join(data_folder, f"{language}.csv")
     df = pd.read_csv(csv_path)
@@ -190,6 +243,15 @@ def get_sample_texts(language: str, num_samples: int = 5):
 
 
 if __name__ == "__main__":
+    """Demonstration script for semantic alignment training.
+
+    This script shows how to:
+    1. Initialize a model with LoRA adapters
+    2. Load parallel text pairs
+    3. Compute initial cross-lingual similarities
+    4. Perform semantic alignment training
+    5. Evaluate the improvement in cross-lingual alignment
+    """
     model_path = "distilbert/distilbert-base-cased"
     model_path = "distilbert/distilbert-base-multilingual-cased"
 

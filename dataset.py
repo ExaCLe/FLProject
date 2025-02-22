@@ -1,11 +1,21 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
-from transformers import GPT2Tokenizer
 
 
-# Define a classification dataset for XNLI
 class CustomTextDataset(Dataset):
+    """A custom dataset for handling text pairs in natural language inference tasks.
+
+    This dataset is designed to work with sentence pairs and their corresponding labels,
+    specifically for tasks like XNLI (Cross-lingual Natural Language Inference).
+
+    Args:
+        sentence_pairs (list): List of tuples containing pairs of sentences
+        labels (list): List of corresponding labels for each sentence pair
+        tokenizer: Tokenizer for processing the text
+        max_length (int): Maximum sequence length for tokenization
+    """
+
     def __init__(self, sentence_pairs, labels, tokenizer, max_length):
         self.sentence_pairs = sentence_pairs
         self.labels = labels
@@ -13,9 +23,22 @@ class CustomTextDataset(Dataset):
         self.max_length = max_length
 
     def __len__(self):
+        """Return the total number of samples in the dataset.
+
+        Returns:
+            int: Number of samples
+        """
         return len(self.sentence_pairs)
 
     def __getitem__(self, idx):
+        """Get a single sample from the dataset.
+
+        Args:
+            idx (int): Index of the sample to retrieve
+
+        Returns:
+            tuple: (input_ids, attention_mask, label) tensors for the model
+        """
         sentence1, sentence2 = self.sentence_pairs[idx]
         tokenized = self.tokenizer(
             sentence1,
@@ -40,16 +63,18 @@ def load_data(
     total_partitions: int = 1,
     max_length: int = 128,
 ):
-    """
-    Load and partition training data for a specific language from the main CSV.
+    """Load and partition training data for a specific language from the main CSV.
 
     Args:
-        language: Language code to filter by
-        tokenizer: Tokenizer to use
-        batch_size: Batch size for DataLoader
-        partition_id: Which partition of the data to load (0 to total_partitions-1)
-        total_partitions: Total number of partitions to split data into
-        max_length: Max sequence length for tokenization
+        language (str): Language code to filter by
+        tokenizer: Tokenizer instance for text processing
+        batch_size (int): Batch size for DataLoader
+        partition_id (int): Which partition of the data to load (0 to total_partitions-1)
+        total_partitions (int): Total number of partitions to split data into
+        max_length (int): Maximum sequence length for tokenization
+
+    Returns:
+        DataLoader: DataLoader instance containing the partitioned dataset
     """
     # Load the main XNLI training data
     csv_path = "./data/xnli/xnli_filtered_dev.csv"
@@ -88,7 +113,17 @@ def load_data(
 
 
 def load_validation_data(tokenizer, languages=None, max_length=128, batch_size=32):
-    """Load the validation dataset for specified languages or all languages."""
+    """Load the validation dataset for specified languages.
+
+    Args:
+        tokenizer: Tokenizer instance for text processing
+        languages (list, optional): List of language codes to include. If None, includes all languages
+        max_length (int): Maximum sequence length for tokenization
+        batch_size (int): Batch size for DataLoader
+
+    Returns:
+        DataLoader: DataLoader instance containing the validation dataset
+    """
     csv_path = "./data/xnli/xnli_validation.csv"
     df = pd.read_csv(csv_path)
 
@@ -109,7 +144,17 @@ def load_validation_data(tokenizer, languages=None, max_length=128, batch_size=3
 
 
 def load_test_data(tokenizer, languages=None, max_length=128, batch_size=32):
-    """Load the test dataset for specified languages or all languages."""
+    """Load the test dataset for specified languages.
+
+    Args:
+        tokenizer: Tokenizer instance for text processing
+        languages (list, optional): List of language codes to include. If None, includes all languages
+        max_length (int): Maximum sequence length for tokenization
+        batch_size (int): Batch size for DataLoader
+
+    Returns:
+        DataLoader: DataLoader instance containing the test dataset
+    """
     csv_path = "./data/xnli/xnli_test.csv"
     df = pd.read_csv(csv_path)
 

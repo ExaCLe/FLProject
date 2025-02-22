@@ -1,60 +1,46 @@
 import argparse
+import os
+import random
+import shutil
 import time
-import flwr as fl
+from datetime import datetime
+
+import numpy as np
+import torch
+import wandb
 from flwr.client import ClientApp
-from flwr.common import Context
+from flwr.common import Context, parameters_to_ndarrays
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.server.strategy import FedAvg
 from flwr.simulation import run_simulation
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from peft.mapping import get_peft_model
 from peft.tuners.lora import LoraConfig
 from peft.utils.peft_types import TaskType
-from peft.mapping import get_peft_model
-import wandb
-from dataset import load_test_data, load_validation_data
-import shutil
-import os
-from torch.utils.data import ConcatDataset
-from torch.utils.data import DataLoader
-import random
-import numpy as np
-from datetime import datetime
+from torch.utils.data import ConcatDataset, DataLoader
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from client import GPT2FLClient
-from dataset import load_data
+from client import FLClient
+from dataset import load_data, load_test_data, load_validation_data
 from model import test, train
-from semantic_alignment import semantic_alignment_training  # import the function
+
+"""Main script for running federated and centralized training experiments on XNLI dataset."""
 
 MODEL_CONFIGS = {
-    "gpt2": {
-        "path": "openai-community/gpt2",
-        "pad_token_strategy": "eos_token",
-    },
-    "t5-small": {
-        "path": "google-t5/t5-small",
-        "pad_token_strategy": "pad_token",
-    },
     "multi-distilbert": {
         "path": "distilbert/distilbert-base-multilingual-cased",
-        "pad_token_strategy": "pad_token",
     },
     "distilbert": {
         "path": "distilbert/distilbert-base-cased",
-        "pad_token_strategy": "pad_token",
-    },
-    "distilroberta": {
-        "path": "distilbert/distilroberta-base",
-        "pad_token_strategy": "pad_token",
-    },
-    "all-minilm": {
-        "path": "sentence-transformers/all-MiniLM-L6-v2",
-        "pad_token_strategy": "pad_token",
     },
 }
 
 
 def get_device():
+    """Determine the available device for model training.
+
+    Returns:
+        torch.device: Available device (cuda, mps, or cpu)
+    """
     if torch.cuda.is_available():
         return torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -63,7 +49,15 @@ def get_device():
 
 
 def save_model(model, experiment_name):
-    """Save model checkpoint."""
+    """Save model checkpoint to disk.
+
+    Args:
+        model: Model to be saved
+        experiment_name (str): Name of the experiment for file organization
+
+    Returns:
+        str: Path where model was saved
+    """
     save_dir = f"models/{experiment_name}"
     os.makedirs(save_dir, exist_ok=True)
     model_path = os.path.join(save_dir, f"model_round_{time.time()}")
@@ -71,8 +65,102 @@ def save_model(model, experiment_name):
     return model_path
 
 
+class MetricsAggregationStrategy(FedAvg):
+    """Custom federated averaging strategy with metrics logging.
+
+    Extends Flower's FedAvg strategy to include logging of training and evaluation metrics
+    to Weights & Biases.
+
+    Args:
+        device: Device to use for computations
+        *args: Additional positional arguments for FedAvg
+        **kwargs: Additional keyword arguments for FedAvg
+    """
+
+    def __init__(self, device, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.device = device
+        self.current_round = 0
+        self.global_weights = None
+
+    def aggregate_fit(self, server_round, results, failures):
+        self.current_round = server_round
+        aggregated_result = super().aggregate_fit(server_round, results, failures)
+        if aggregated_result is not None:
+            self.global_weights = aggregated_result
+
+            client_metrics = [res.metrics for _, res in results]
+            if client_metrics:
+                avg_loss = sum(m["train_loss"] for m in client_metrics) / len(client_metrics)  # type: ignore
+                avg_accuracy = sum(m["train_accuracy"] for m in client_metrics) / len(client_metrics)  # type: ignore
+                wandb.log(
+                    {
+                        "round": server_round,
+                        "aggregated/train_loss": avg_loss,
+                        "aggregated/train_accuracy": avg_accuracy,
+                        **{
+                            f"client_{m['client_id']}/train_loss": m["train_loss"]
+                            for m in client_metrics
+                        },
+                        **{
+                            f"client_{m['client_id']}/train_accuracy": m[
+                                "train_accuracy"
+                            ]
+                            for m in client_metrics
+                        },
+                    }
+                )
+        return aggregated_result
+
+    def aggregate_evaluate(self, server_round, results, failures):
+        aggregated_result = super().aggregate_evaluate(server_round, results, failures)
+        if results:
+            client_metrics = [res.metrics for _, res in results]
+            avg_accuracy = sum(m["accuracy"] for m in client_metrics) / len(client_metrics)  # type: ignore
+            wandb.log(
+                {
+                    "round": server_round,
+                    "aggregated/eval_accuracy": avg_accuracy,
+                    **{
+                        f"client_{m['client_id']}/eval_accuracy": m["accuracy"]
+                        for m in client_metrics
+                    },
+                }
+            )
+        return aggregated_result
+
+
+def convert_weight(weight, target_dtype, device):
+    """Convert weights between different formats and devices.
+
+    Args:
+        weight: Weight tensor or parameter to convert
+        target_dtype: Target data type
+        device: Target device
+
+    Returns:
+        torch.Tensor: Converted weight tensor
+    """
+    # If weight is an instance of Parameters, convert its first ByteBuffer to a numpy array.
+    if hasattr(weight, "tensors"):
+        # Example conversion: adjust dtype mapping as needed based on weight.tensorType.
+        buf = weight.tensors[0]
+        weight_np = np.frombuffer(buf, dtype=np.float32)  # adjust dtype if necessary
+    else:
+        weight_np = weight.cpu().numpy() if isinstance(weight, torch.Tensor) else weight
+    return torch.as_tensor(weight_np, dtype=target_dtype, device=device)
+
+
 def centralized_training(model, languages, tokenizer, device, args):
-    """Run centralized training on all data."""
+    """Run centralized training on combined data from all languages.
+
+    Args:
+        model: Model to train
+        languages (list): List of language codes
+        tokenizer: Tokenizer for processing text
+        device: Device to run training on
+        args: Training configuration arguments
+    """
     # Combine data from all languages
     all_trainloaders = [
         load_data(lang, tokenizer, batch_size=args.batch_size) for lang in languages
@@ -158,76 +246,17 @@ def centralized_training(model, languages, tokenizer, device, args):
     print(f"Final validation accuracy: {best_val_accuracy:.4f}")
 
 
-class MetricsAggregationStrategy(FedAvg):
-    def __init__(self, device, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.device = device
-        self.current_round = 0
-        self.global_weights = None  # New attribute
-
-    def aggregate_fit(self, server_round, results, failures):
-        self.current_round = server_round
-        aggregated_result = super().aggregate_fit(server_round, results, failures)
-        if aggregated_result is not None:
-            self.global_weights = aggregated_result  # Store latest aggregated weights
-
-            client_metrics = [res.metrics for _, res in results]
-            if client_metrics:
-                avg_loss = sum(m["train_loss"] for m in client_metrics) / len(client_metrics)  # type: ignore
-                avg_accuracy = sum(m["train_accuracy"] for m in client_metrics) / len(client_metrics)  # type: ignore
-                wandb.log(
-                    {
-                        "round": server_round,
-                        "aggregated/train_loss": avg_loss,
-                        "aggregated/train_accuracy": avg_accuracy,
-                        **{
-                            f"client_{m['client_id']}/train_loss": m["train_loss"]
-                            for m in client_metrics
-                        },
-                        **{
-                            f"client_{m['client_id']}/train_accuracy": m[
-                                "train_accuracy"
-                            ]
-                            for m in client_metrics
-                        },
-                    }
-                )
-        return aggregated_result
-
-    def aggregate_evaluate(self, server_round, results, failures):
-        aggregated_result = super().aggregate_evaluate(server_round, results, failures)
-        if results:
-            client_metrics = [res.metrics for _, res in results]
-            avg_accuracy = sum(m["accuracy"] for m in client_metrics) / len(client_metrics)  # type: ignore
-            wandb.log(
-                {
-                    "round": server_round,
-                    "aggregated/eval_accuracy": avg_accuracy,
-                    **{
-                        f"client_{m['client_id']}/eval_accuracy": m["accuracy"]
-                        for m in client_metrics
-                    },
-                }
-            )
-        return aggregated_result
-
-
-def convert_weight(weight, target_dtype, device):
-    print(type(weight))
-    # If weight is an instance of Parameters, convert its first ByteBuffer to a numpy array.
-    if hasattr(weight, "tensors"):
-        # Example conversion: adjust dtype mapping as needed based on weight.tensorType.
-        buf = weight.tensors[0]
-        weight_np = np.frombuffer(buf, dtype=np.float32)  # adjust dtype if necessary
-    else:
-        weight_np = weight.cpu().numpy() if isinstance(weight, torch.Tensor) else weight
-    return torch.as_tensor(weight_np, dtype=target_dtype, device=device)
-
-
-from flwr.common import parameters_to_ndarrays, Parameters
-
-
 def federated_training(model, languages, tokenizer, device, args, experiment_id):
+    """Run federated training across multiple language-specific clients.
+
+    Args:
+        model: Model to train
+        languages (list): List of language codes
+        tokenizer: Tokenizer for processing text
+        device: Device to run training on
+        args: Training configuration arguments
+        experiment_id (str): Unique identifier for the experiment
+    """
     # Calculate total clients (languages * clients per language)
     total_clients = len(languages) * args.num_clients_per_language
 
@@ -258,7 +287,7 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
             tokenizer, languages, batch_size=args.batch_size
         )
 
-        client = GPT2FLClient(
+        client = FLClient(
             model=model,
             trainloader=trainloader,
             testloader=testloader,
@@ -293,7 +322,6 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
         backend_config=backend_config,  # type: ignore
     )
 
-    # New code: If final global weights exist, load them into the model before final evaluation.
     if strategy.global_weights is not None and strategy.global_weights[0] is not None:
         # Now convert Parameters to numpy arrays
         ndarrays = parameters_to_ndarrays(strategy.global_weights[0])
@@ -320,7 +348,14 @@ def federated_training(model, languages, tokenizer, device, args, experiment_id)
 
 
 def generate_run_name(config):
-    """Generate descriptive name for individual runs based on their parameters."""
+    """Generate a descriptive name for the experiment run.
+
+    Args:
+        config (dict): Configuration parameters
+
+    Returns:
+        str: Generated run name including key parameters and timestamp
+    """
     model = config.get("model_name", "unknown")
     if model == "distilbert":
         model = "d"
@@ -340,6 +375,14 @@ def generate_run_name(config):
 
 
 def main(config):
+    """Main function to run the training experiment.
+
+    Sets up the environment, initializes the model and training components,
+    and runs either federated or centralized training based on configuration.
+
+    Args:
+        config: Configuration object containing all training parameters
+    """
     # Set seeds for reproducibility
     random.seed(config.seed)
     np.random.seed(config.seed)
@@ -393,10 +436,6 @@ def main(config):
     model_config = MODEL_CONFIGS[config.model_name]
     tokenizer = AutoTokenizer.from_pretrained(model_config["path"])
 
-    # Handle padding token based on model type
-    if model_config["pad_token_strategy"] == "eos_token":
-        tokenizer.pad_token = tokenizer.eos_token
-
     device = get_device()
     print(f"Using device: {device}")
 
@@ -405,13 +444,6 @@ def main(config):
         model_config["path"],
         num_labels=3,
     ).to(device)
-
-    # Set pad token ID if needed
-    if (
-        hasattr(model.config, "pad_token_id")
-        and model_config["pad_token_strategy"] == "eos_token"
-    ):
-        model.config.pad_token_id = tokenizer.pad_token_id
 
     # Apply LoRA adapters with CLI arguments
     peft_config = LoraConfig(
@@ -439,6 +471,7 @@ def main(config):
 
 
 if __name__ == "__main__":
+    """Parse command-line arguments and run the main function."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--num_supernodes", type=int, default=5, help="Number of clients to simulate"

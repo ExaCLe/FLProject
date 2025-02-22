@@ -1,25 +1,43 @@
 import torch
 from torch.optim import AdamW
-from tqdm import trange, tqdm
-from contextlib import nullcontext
+from tqdm import tqdm
 from semantic_alignment import semantic_alignment_training
 
 
-# Updated Training function
 def train(
     net,
     trainloader,
     epochs,
     device,
     learning_rate=5e-5,
-    # Add semantic alignment parameters
     sa_interval: float = 0.0,
     sa_samples: int = 0,
     sa_epochs: int = 0,
     language: str = None,  # type: ignore
     tokenizer=None,
 ):
-    """Training function that includes semantic alignment at specified intervals."""
+    """Train a neural network with optional semantic alignment.
+
+    This function handles both standard training and semantic alignment training
+    at specified intervals for non-English languages.
+
+    Args:
+        net: Neural network model to train
+        trainloader: DataLoader containing training data
+        epochs (int): Number of training epochs
+        device: Device to run training on (cuda/cpu)
+        learning_rate (float, optional): Learning rate for optimization. Defaults to 5e-5
+        sa_interval (float, optional): Interval for semantic alignment (fraction of epoch or batches). Defaults to 0.0
+        sa_samples (int, optional): Number of samples for semantic alignment. Defaults to 0
+        sa_epochs (int, optional): Number of epochs for semantic alignment training. Defaults to 0
+        language (str, optional): Language code for current training data. Defaults to None
+        tokenizer (optional): Tokenizer for text processing. Defaults to None
+
+    Returns:
+        dict: Training metrics including:
+            - train_loss (float): Average training loss
+            - train_accuracy (float): Training accuracy
+    """
     optimizer = AdamW(net.parameters(), lr=learning_rate)
     net.train()
     net.to(device)
@@ -75,16 +93,26 @@ def train(
                     num_epochs=sa_epochs,
                     batch_size=trainloader.batch_size,
                 )
-                # Reset batch counter to handle multiple alignments per epoch if sa_interval < 1
                 batch_counter = 0
-                net.train()  # Ensure we're back in training mode
+                net.train()
 
     avg_loss = total_loss / num_batches if num_batches > 0 else 0
     return {"train_loss": avg_loss, "train_accuracy": correct / total}
 
 
-# Evaluation function with accuracy calculation
 def test(net, testloader, device):
+    """Evaluate a neural network model on test data.
+
+    Args:
+        net: Neural network model to evaluate
+        testloader: DataLoader containing test data
+        device: Device to run evaluation on (cuda/cpu)
+
+    Returns:
+        tuple: (avg_loss, accuracy)
+            - avg_loss (float): Average loss on test set
+            - accuracy (float): Classification accuracy on test set
+    """
     net.eval()
     net.to(device)
     total_loss = 0
